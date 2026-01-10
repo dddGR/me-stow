@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import List
 import shutil as su
 import sys
-from classes import Params, ResolveType
+from classes import Operation, Params, ResolveType, Arguments
 
 
 # ============================================================= #
@@ -14,38 +14,47 @@ def print_help(exit=False, exit_code=0) -> None:
     """
     Helper Messages
     """
-    print("""
+    print(f"""
 ------------------------------------------------------------
 Usage:
   me-stow [options] <packages>
-    --init          TODO
-      update        TODO
-      remove        TODO
+    <packages>      Can pass in one or multiple packages. If non specify
+                    this script will process all the packages that in source dir.
+    [options]
+    --{Arguments.INIT}          Make symlink to the file that in source folder. This is
+                    similar to `gnu stow`.
+      {Arguments.UPDATE}        TODO
+      {Arguments.REMOVE}        Delete the symlink file on the system, can be use with
+                    `--copy-back` flag to replace symlink file with actual file.
 
-    --save-config   Save config to 'configs.json', this will automatic on
+    --{Arguments.SAVE_CONFIG}   Save config to 'configs.json', this will automatic on
                     when run script the first time or when configs.json not found.
 
-    --force         Override current file on system if conflicts
+    --{Arguments.FORCE}         Override current file on system if conflicts.
 
-    --resolve=      Strategy to resolve conflict files
-        replace     - Replace current file on system with a symlink,
-                      similar with the flag --force
-        adopt       - (default) Copy current file on system to source folder and
+    --{Arguments.RESOLVE}=      Use with `init` operation, strategy to resolve conflict files.
+        {ResolveType.REPLACE.value}     - Replace current file on system with a symlink,
+                      similar with the flag --force.
+        {ResolveType.ADOPT.value}       - (default) Copy current file on system to source folder and
                       override file on source (this is like --adopt on stow),
                       then user can use git to compare (or restore) them.
 
-    -v | --verbose  Vebose output
-    -h | --help     Print help usage
+    --{Arguments.COPY_BACK}     Use with `remove` operation, this will copy file on source to
+                    the link files on the system. Like replace symlink file with
+                    actual file.
+
+    -v | --{Arguments.VERBOSE}  Vebose output
+    -h | --{Arguments.HELP}     Print help usage
 Examples:
     me-stow --init
 
-    me-stow --update --force
+    me-stow --update --resolve=replace
 
     me-stow some-package
 
-    me-stow some-package --force
-
     me-stow more_package even-more-package
+
+    me-stow some-package --remove
     
 """)
 
@@ -81,6 +90,7 @@ def main():
         err_print_help_exit(e)
 
     if params.verbose:
+        print(f"Running: {params.op.value}")
         params.print_all_packages()
 
     # TODO: op type
