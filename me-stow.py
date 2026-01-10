@@ -28,9 +28,9 @@ Usage:
     --force         Override current file on system if conflicts
 
     --resolve=      Strategy to resolve conflict files
-        replace     - Replace current file on machine with a symlink,
+        replace     - Replace current file on system with a symlink,
                       similar with the flag --force
-        git         - (default) Copy current file on machine to source folder and
+        adopt       - (default) Copy current file on system to source folder and
                       override file on source (this is like --adopt on stow),
                       then user can use git to compare (or restore) them.
 
@@ -99,7 +99,7 @@ def main():
 # ============================================================ #
 
 
-def process_stow_package(dest_dir: Path, package: Path, resolve: ResolveType) -> None:
+def process_stow_package(dest_dir: Path, package: Path, res_type: ResolveType) -> None:
     """
     Create a symlink from package (and all it's content) to destination directory.
 
@@ -122,7 +122,7 @@ def process_stow_package(dest_dir: Path, package: Path, resolve: ResolveType) ->
         dest_file = dest_dir / file.name
         try:
             # THIS ONLY PASS WHEN CONFLICTS HAPPEN
-            if resolve == ResolveType.GIT:
+            if res_type == ResolveType.ADOPT:
                 # Override source file with file current in system
                 su.copyfile(dest_file, file)
             dest_file.unlink()

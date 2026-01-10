@@ -11,7 +11,7 @@ from typing import Dict, List, Any
 
 
 class ResolveType(Enum):
-    GIT = "git"
+    ADOPT = "adopt"
     REPLACE = "replace"
 
 
@@ -82,7 +82,7 @@ class Params:
                 if input("Use HOME as root directory [Y/n]: ").lower().startswith("n")
                 else ""
             )
-            config[Key.RESOLVE] = ResolveType.GIT.value
+            config[Key.RESOLVE] = ResolveType.ADOPT.value
 
         return config
 
