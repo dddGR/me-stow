@@ -128,6 +128,9 @@ def process_stow_package(dest_dir: Path, package: Path, res_type: ResolveType) -
             dest_file.unlink()
         except FileNotFoundError:
             pass
+        except su.SameFileError:
+            # File already linked and good
+            continue
 
         dest_file.symlink_to(file)
 
