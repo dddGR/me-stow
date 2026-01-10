@@ -107,16 +107,27 @@ def process_stow_package(dest_dir: Path, package: Path, res_type: ResolveType) -
     """
     link_files: List[Path] = []
     for entry in package.iterdir():
-        if entry.is_dir():
-            new_dest = dest_dir / entry.name
-            # TODO: If current dir on system is a symlink, happen if maybe use stow before
-            if not new_dest.exists():
-                new_dest.mkdir()
-            # recursive call
-            process_stow_package(new_dest, entry, resolve)
-
         if entry.is_file():
             link_files.append(entry)
+
+        elif entry.is_dir():
+            new_dest = dest_dir / entry.name
+            if new_dest.is_symlink():
+                # This also make sure the new_dest exist and is a symlink
+                match res_type:
+                    case ResolveType.REPLACE:
+                        new_dest.unlink()
+                    case ResolveType.ADOPT:
+                        try:
+                            new_dest = new_dest.resolve(strict=True)
+                        except FileNotFoundError:  # Broken link
+                            new_dest.unlink()
+                    case _:
+                        raise ValueError("Unhandle type: this should not happend!")
+
+            new_dest.mkdir(exist_ok=True)
+            # recursive call
+            process_stow_package(new_dest, entry, res_type)
 
     for file in link_files:
         dest_file = dest_dir / file.name
