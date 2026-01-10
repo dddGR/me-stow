@@ -34,9 +34,9 @@ Usage:
 
     --{Arguments.RESOLVE}=      Use with `init` operation, strategy to resolve conflict files.
         {ResolveType.REPLACE.value}     - Replace current file on system with a symlink,
-                      similar with the flag --force.
+                      similar with the flag `--force`.
         {ResolveType.ADOPT.value}       - (default) Copy current file on system to source folder and
-                      override file on source (this is like --adopt on stow),
+                      override file on source (this is like `--adopt` on stow),
                       then user can use git to compare (or restore) them.
 
     --{Arguments.COPY_BACK}     Use with `remove` operation, this will copy file on source to
@@ -93,16 +93,23 @@ def main():
         print(f"Running: {params.op.value}")
         params.print_all_packages()
 
-    # TODO: op type
-    for pkg in params.packages:
-        process_stow_package(params.root, pkg, params.resolve)
+    match params.op:
+        case Operation.INIT:
+            for pkg in params.packages:
+                process_stow_package(params.root, pkg, params.resolve)
+
+            # TODO: check for failure
+            num = len(params.packages)
+            print("...DONE" + (f" -- [{num}] packages stowed" if num > 1 else ""))
+
+        case Operation.REMOVE:
+            for pkg in params.packages:
+                remove_stow_package(params.root, pkg, params.copy_back)
+                # TODO: check for failure
+                print(f"[ok] -- package '{pkg.name}' removed")
 
     if params.save_config:
         params.save_configuration(CONFIG_FILE)
-
-    # TODO: check for failure
-    num = len(params.packages)
-    print("...DONE" + (f" -- [{num}] packages stowed" if num > 1 else ""))
 
 
 # ============================================================ #
@@ -154,6 +161,37 @@ def process_stow_package(dest_dir: Path, package: Path, res_type: ResolveType) -
             continue
 
         dest_file.symlink_to(file)
+
+
+def remove_stow_package(dest_dir: Path, package: Path, restore: bool) -> None:
+    """
+    Remove a stowed package.
+
+    NOTE: can run recursively
+
+    :param restore: `True` will copy file in source into system,
+                    this is like replace linked file with actual file
+    :type restore: bool
+    """
+    for entry in package.iterdir():
+        file_on_sys = dest_dir / entry.name
+
+        if entry.is_dir():
+            # recursive call
+            remove_stow_package(file_on_sys, entry, restore)
+
+        elif entry.is_file():
+            if file_on_sys.samefile(entry):
+                file_on_sys.unlink()
+
+                if restore:
+                    su.copy(entry, file_on_sys)
+
+    try:
+        dest_dir.rmdir()
+    except OSError:
+        # well, don't remove non empty folder
+        pass
 
 
 if __name__ == "__main__":
