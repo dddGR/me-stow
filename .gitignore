@@ -13,3 +13,4 @@ wheels/
 # Misc
 _*
 .vscode
+config.json
