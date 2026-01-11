@@ -238,7 +238,7 @@ class Params:
         for pkg in self.packages:
             name = f"'{pkg.name}'"
             print(name, "-" * (40 - (len(name))))
-            for line in tree(pkg):
+            for line in print_tree(pkg):
                 print(line)
 
     def save_configuration(self, file_dir: Path) -> None:
@@ -320,7 +320,7 @@ TREE_TEE = "├── "
 TREE_LAST = "└── "
 
 
-def tree(dir_path: Path, prefix: str = "") -> Generator[str]:
+def print_tree(dir_path: Path, prefix: str = "") -> Generator[str]:
     """
     A recursive generator, given a directory Path object will yield
     a visual tree structure line by line with each line prefixed by
@@ -328,20 +328,12 @@ def tree(dir_path: Path, prefix: str = "") -> Generator[str]:
 
     Credit to: https://stackoverflow.com/a/59109706 with some modification
     """
-    contents = list(dir_path.iterdir())
-    files = []
-    # contents each get pointers that are ├── with a final └── :
+    contents = [d for d in dir_path.iterdir() if d.is_dir()]
+    contents += [f for f in dir_path.iterdir() if f.is_file()]
     pointers = [TREE_TEE] * (len(contents) - 1) + [TREE_LAST]
+
     for pointer, path in zip(pointers, contents):
-        out = prefix + pointer + path.name
-        if path.is_file():
-            files.append(out)
-            continue
-
-        yield out
-        extension = TREE_BRANCH if pointer == TREE_TEE else TREE_SPACE
-        # i.e. space because last, └── , above so no more |
-        yield from tree(path, prefix=prefix + extension)
-
-    for file in files:
-        yield file
+        yield prefix + pointer + path.name
+        if path.is_dir():
+            extension = TREE_BRANCH if pointer == TREE_TEE else TREE_SPACE
+            yield from print_tree(path, prefix=prefix + extension)
