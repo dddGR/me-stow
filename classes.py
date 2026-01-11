@@ -170,13 +170,17 @@ class Params:
                     # inside source direction.
                     pkg = self.source_dir / arg
                     self.packages.append(pkg.resolve(strict=True))
-                    continue
                 except FileNotFoundError:
                     # Maybe this is new package that user want to add to source
                     self.packages.append(pkg)
+                continue
+
+            if self.op == Operation.STOW and (dir := Path(arg).absolute()).is_dir():
+                # stow all the files in this directory
+                self.stowers.extend([f for f in dir.rglob("*") if f.is_file()])
+
             else:
-                # TODO: maybe raise error here
-                print(f"[warning] -- path not exist: '{arg}'")
+                raise ValueError(f"[warning] -- path not exist: '{arg}'")
 
     def eval_operation(self) -> None:
         match self.op:
