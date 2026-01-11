@@ -16,7 +16,6 @@ def print_help(exit=False, exit_code=0) -> None:
     """
     # Just to look a little bit nicer
     i_ = Arguments.INIT
-    upda = Arguments.UPDATE
     remo = Arguments.REMOVE
     st = Arguments.STOW
     save_conf = Arguments.SAVE_CONFIG
@@ -30,45 +29,68 @@ def print_help(exit=False, exit_code=0) -> None:
     print(f"""
 ------------------------------------------------------------
 Usage:
-  me-stow [options] <packages>
+  me-stow [operation] [options] <packages>
     <packages>      Can pass in one or multiple packages. If non specify
-                    this script will process all the packages that in source dir.
-    [options]
-    --{i_}          Make symlink to the file that in source folder. This is
-                    similar to `gnu stow`.
-      {upda}        TODO
-      {remo}        Delete the symlink file on the system, can be use with
-                    `--copy-back` flag to replace symlink file with actual file.
-      {st}          Add new file into package.
+                    | this script will process all the packages that in source dir.
+    
+    [operation]     NOTE: only one op or omit
+    --{i_}          Run this when you want to put stowed file to system.
+                    | Make symlink to the file that in source folder.
+                    | This is similar to `gnu stow`.
+    --{st}          Run this when you want to stow file on system to source.
+                    | Add new file that currently in system into package.
+                    | Make new one if package is not currently exist.
+    --{remo}        Use this when you want to remove link file in system.
+                    | Delete the symlink file on the system (not on source).
+                    | can be use with `--copy-back` flag to replace symlink
+                    | file with actual file (copy file from source to the
+                    | deleted file direction).
+    
+    -h | --{he}     Print this help message.
 
+    [options]
     --{save_conf}   Save config to 'configs.json', this will automatic on
-                    when run script the first time or when configs.json not found.
+                    | when run script the first time or when configs.json not found.
 
     --{fo_}         Override current file on system if conflicts.
 
     --{resol}=      Use with `init` operation, strategy to resolve conflict files.
         {repla}     - Replace current file on system with a symlink,
-                      similar with the flag `--force`.
+                    | similar with the flag `--force`.
         {ado}       - (default) Copy current file on system to source folder and
-                      override file on source (this is like `--adopt` on stow),
-                      then user can use git to compare (or restore) them.
+                    | override file on source (this is like `--adopt` on stow),
+                    | then user can use git to compare (or restore) them.
 
     --{copy_ba}     Use with `remove` operation, this will copy file on source to
-                    the link files on the system. Like replace symlink file with
-                    actual file.
+                    | the link files on the system. Like replace symlink file
+                    | with actual file.
 
     -v | --{verbo}  Vebose output
-    -h | --{he}     Print help usage
+    
 Examples:
-    me-stow --init
+    CMD = python3 `me-stow.py`
+          or just `me-stow` if you put a link in PATH point to `me-stow.py`
 
-    me-stow --update --resolve=replace
+    # init package
+    CMD --init # this will init all the pakages in source dir
+    CMD --init <or-you-can-put-pakages-name-here>
+    # or you can omit the `--init` flag
+    CMD <omit or you can put pakages name here>
 
-    me-stow some-package
+    # this will replace current file on your system if confict happen
+    CMD <pakages-name> --resolve=replace
+    CMD <pakages-name> --force # equivalent to above
 
-    me-stow more_package even-more-package
+    # stow file to package
+    # (can process multiple files but only 1 package at a time)
+    CMD --stow <package-name> <path-to-files>
+    # or you can omit the `--stow` flag
+    CMD <package-name> <path-to-files>
 
-    me-stow some-package --remove
+    # remove package
+    CMD --remove <packages-name>
+    CMD --remove --copy-back <packages-name>
+    CMD --remove # omit package will remove all the packages
     
 """)
 
@@ -101,32 +123,38 @@ def main():
     except ValueError as e:
         err_print_help_exit(e)
 
+    success = 0
+    total = len(params.packages)
     match params.op:
         case Operation.HELP:
             print_help(exit=True)
 
         case Operation.INIT:
             for pkg_dir in params.packages:
+                if not pkg_dir.exists():
+                    print(f"[skipped] -- package not exist: '{pkg_dir.name}'")
+                    continue
                 process_init_package(params.root, pkg_dir, params.resolve)
-
-            # TODO: check for failure
-            num = len(params.packages)
-            print(f" -- [{num}] packages stowed" if num > 1 else "")
+                # TODO: check for failure
+                success += 1
 
         case Operation.REMOVE:
             for pkg_dir in params.packages:
                 remove_stow_package(params.root, pkg_dir, params.copy_back)
                 # TODO: check for failure
                 print(f"[ok] -- package '{pkg_dir.name}' removed")
+                success += 1
 
         case Operation.STOW:
-            pkg = params.get_package_to_stow()
-            success = process_stow_package(pkg, params.stowers, params.root)
-            print(f"[ok] -- [{success}] files stow to package '{pkg.name}'")
+            total = len(params.stowers)
+            success = process_stow_package(
+                params.get_package_to_stow(), params.stowers, params.root
+            )
 
     if params.save_config:
         params.save_configuration(CONFIG_FILE)
 
+    print_result(params, total, success)
     print("...DONE")
 
 
@@ -238,6 +266,19 @@ def process_stow_package(
             success += 1
 
     return success
+
+
+def print_result(param: Params, total: int, success: int) -> None:
+    msg = f"-- [{success} / {total}] packages "
+    match param.op:
+        case Operation.INIT:
+            msg += "init"
+        case Operation.STOW:
+            msg += f"stowed to package {param.get_package_to_stow().name}"
+        case Operation.REMOVE:
+            msg += "removed"
+
+    print(msg)
 
 
 if __name__ == "__main__":

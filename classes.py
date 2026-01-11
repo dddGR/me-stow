@@ -111,6 +111,10 @@ class Params:
         return config
 
     def assign_user_arguments(self) -> None:
+        if len(sys.argv) == 1:
+            self.op = Operation.HELP
+            return
+
         for arg in sys.argv[1:]:
             if arg.startswith("--"):
                 key = arg[2:].lower()
@@ -168,11 +172,15 @@ class Params:
 
     def eval_operation(self) -> None:
         match self.op:
+            case Operation.HELP:
+                return
+
             case Operation.STOW:
                 if (leng := len(self.packages)) != 1:
                     raise ValueError(
                         f"stow op accept only 1 package, current: [{leng}]"
                     )
+
             case Operation.INIT | Operation.REMOVE if self.stowers:
                 raise ValueError(f"don't pass in file when running: '{self.op.name}'")
 
@@ -192,6 +200,7 @@ class Params:
                     self.op = Operation.STOW
                 else:
                     self.op = Operation.INIT
+
             case _:
                 raise ValueError(f"wrong op: '{self.op.name}'")
 
