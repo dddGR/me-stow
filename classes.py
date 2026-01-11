@@ -19,6 +19,7 @@ class Arguments:
     INIT = "init"
     UPDATE = "update"
     REMOVE = "remove"
+    STOW = "stow"
     SAVE_CONFIG = "save-config"
     COPY_BACK = "copy-back"
     PROCESS_ALL = "all"
@@ -34,6 +35,7 @@ class Operation(Enum):
     INIT = Arguments.INIT
     UPDATE = Arguments.UPDATE
     REMOVE = Arguments.REMOVE
+    STOW = Arguments.STOW
 
 
 @dataclass
@@ -52,6 +54,7 @@ class Params:
         self.copy_back = False
         self.get_all = False
         self.packages: List[Path] = []
+        self.stowers: List[Path] = []
 
         _cfg = self.get_configurations(config_file)
         self.source_dir = Path(_cfg[ConfigKey.SOURCE])
@@ -61,15 +64,36 @@ class Params:
         self.assign_user_arguments()
 
         # CHECK POINT
-        if not self.packages:
-            if self.op == Operation.NONE:
-                raise ValueError("Invalid arguments!!")
-            if self.op == Operation.INIT or self.get_all:
-                # First run, get all the packages in sources folder to stow
-                self.find_all_packages()
+        self.eval_operation()
 
         if self.verbose:
             pass
+
+    def eval_operation(self) -> None:
+        match self.op:
+            case Operation.STOW:
+                if (leng := len(self.packages)) != 1:
+                    raise ValueError(
+                        f"stow op accept only 1 package, current: [{leng}]"
+                    )
+            case Operation.INIT | Operation.REMOVE:
+                if self.stowers:
+                    raise ValueError(f"don't pass in file when op: '{self.op.name}'")
+                if not self.packages:
+                    self.get_all = True
+
+            case Operation.NONE:
+                if not self.packages:
+                    raise ValueError("Invalid arguments!!")
+                else:
+                    self.op = Operation.INIT
+            case _:
+                raise ValueError(f"wrong op: '{self.op.name}'")
+
+        if self.get_all:
+            if self.packages:
+                raise ValueError("don't use --all with other package")
+            self.find_all_packages()
 
     def get_configurations(self, config_file: Path) -> Dict[str, Any]:
         try:
@@ -145,9 +169,29 @@ class Params:
                         raise Warning
                 continue
 
-            pkg = self.source_dir / arg
-            if pkg.exists():
-                self.packages.append(pkg)
+            if (file := Path(arg).absolute()).is_file():
+                # Assume that the pass in argument is a dir path for
+                # the file that need to be stow
+                self.stowers.append(file)
+                self.op = Operation.STOW
+                continue
+
+            if is_folder_name(arg):
+                try:
+                    # If the name of package pass in and it package already
+                    # inside source direction.
+                    pkg = self.source_dir / arg
+                    self.packages.append(pkg.resolve(strict=True))
+                    continue
+                except FileNotFoundError:
+                    # Maybe this is new package that user want to add to source
+                    self.packages.append(pkg)
+            else:
+                # TODO: maybe raise error here
+                print(f"[warning] -- path not exist: '{arg}'")
+
+    def get_package_to_stow(self) -> Path:
+        return self.packages[0]
 
     def find_all_packages(self) -> None:
         for entry in self.source_dir.iterdir():
@@ -204,3 +248,15 @@ class Params:
         if not path.exists():
             raise ValueError(f"path not exist: '{path}'")
         self._root = path
+
+
+def is_folder_name(name: str) -> bool:
+    """
+    Simple check for invalid character in the name.
+    """
+    if sys.platform.lower().startswith("win"):
+        invalid_chars = r"<>:\"/\\|?*" + "".join(chr(i) for i in range(0, 32))
+    else:
+        invalid_chars = r"/"
+
+    return all(char not in invalid_chars for char in name)

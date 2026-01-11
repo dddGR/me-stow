@@ -14,6 +14,19 @@ def print_help(exit=False, exit_code=0) -> None:
     """
     Helper Messages
     """
+    # Just to look a little bit nicer
+    i_ = Arguments.INIT
+    upda = Arguments.UPDATE
+    remo = Arguments.REMOVE
+    st = Arguments.STOW
+    save_conf = Arguments.SAVE_CONFIG
+    fo_ = Arguments.FORCE
+    resol = Arguments.RESOLVE
+    repla = ResolveType.REPLACE.value
+    ado = ResolveType.ADOPT.value
+    copy_ba = Arguments.COPY_BACK
+    verbo = Arguments.VERBOSE
+    he = Arguments.HELP
     print(f"""
 ------------------------------------------------------------
 Usage:
@@ -21,30 +34,31 @@ Usage:
     <packages>      Can pass in one or multiple packages. If non specify
                     this script will process all the packages that in source dir.
     [options]
-    --{Arguments.INIT}          Make symlink to the file that in source folder. This is
+    --{i_}          Make symlink to the file that in source folder. This is
                     similar to `gnu stow`.
-      {Arguments.UPDATE}        TODO
-      {Arguments.REMOVE}        Delete the symlink file on the system, can be use with
+      {upda}        TODO
+      {remo}        Delete the symlink file on the system, can be use with
                     `--copy-back` flag to replace symlink file with actual file.
+      {st}          Add new file into package.
 
-    --{Arguments.SAVE_CONFIG}   Save config to 'configs.json', this will automatic on
+    --{save_conf}   Save config to 'configs.json', this will automatic on
                     when run script the first time or when configs.json not found.
 
-    --{Arguments.FORCE}         Override current file on system if conflicts.
+    --{fo_}         Override current file on system if conflicts.
 
-    --{Arguments.RESOLVE}=      Use with `init` operation, strategy to resolve conflict files.
-        {ResolveType.REPLACE.value}     - Replace current file on system with a symlink,
+    --{resol}=      Use with `init` operation, strategy to resolve conflict files.
+        {repla}     - Replace current file on system with a symlink,
                       similar with the flag `--force`.
-        {ResolveType.ADOPT.value}       - (default) Copy current file on system to source folder and
+        {ado}       - (default) Copy current file on system to source folder and
                       override file on source (this is like `--adopt` on stow),
                       then user can use git to compare (or restore) them.
 
-    --{Arguments.COPY_BACK}     Use with `remove` operation, this will copy file on source to
+    --{copy_ba}     Use with `remove` operation, this will copy file on source to
                     the link files on the system. Like replace symlink file with
                     actual file.
 
-    -v | --{Arguments.VERBOSE}  Vebose output
-    -h | --{Arguments.HELP}     Print help usage
+    -v | --{verbo}  Vebose output
+    -h | --{he}     Print help usage
 Examples:
     me-stow --init
 
@@ -95,18 +109,23 @@ def main():
 
     match params.op:
         case Operation.INIT:
-            for pkg in params.packages:
-                process_stow_package(params.root, pkg, params.resolve)
+            for pkg_dir in params.packages:
+                process_init_package(params.root, pkg_dir, params.resolve)
 
             # TODO: check for failure
             num = len(params.packages)
             print("...DONE" + (f" -- [{num}] packages stowed" if num > 1 else ""))
 
         case Operation.REMOVE:
-            for pkg in params.packages:
-                remove_stow_package(params.root, pkg, params.copy_back)
+            for pkg_dir in params.packages:
+                remove_stow_package(params.root, pkg_dir, params.copy_back)
                 # TODO: check for failure
-                print(f"[ok] -- package '{pkg.name}' removed")
+                print(f"[ok] -- package '{pkg_dir.name}' removed")
+
+        case Operation.STOW:
+            pkg = params.get_package_to_stow()
+            success = process_stow_package(pkg, params.stowers, params.root)
+            print(f"[ok] -- [{success}] files stow to package '{pkg.name}'")
 
     if params.save_config:
         params.save_configuration(CONFIG_FILE)
@@ -116,7 +135,7 @@ def main():
 # ============================================================ #
 
 
-def process_stow_package(dest_dir: Path, package: Path, res_type: ResolveType) -> None:
+def process_init_package(dest_dir: Path, package: Path, res_type: ResolveType) -> None:
     """
     Create a symlink from package (and all it's content) to destination directory.
 
@@ -144,7 +163,7 @@ def process_stow_package(dest_dir: Path, package: Path, res_type: ResolveType) -
 
             new_dest.mkdir(exist_ok=True)
             # recursive call
-            process_stow_package(new_dest, entry, res_type)
+            process_init_package(new_dest, entry, res_type)
 
     for file in link_files:
         dest_file = dest_dir / file.name
@@ -192,6 +211,34 @@ def remove_stow_package(dest_dir: Path, package: Path, restore: bool) -> None:
     except OSError:
         # well, don't remove non empty folder
         pass
+
+
+def process_stow_package(
+    pkg_dir: Path, file_to_stows: List[Path], root_dir: Path
+) -> int:
+    """
+    Stow all the file to the pakage direction.
+    """
+    success = 0
+
+    for file in file_to_stows:
+        try:
+            relative = file.relative_to(root_dir)
+        except ValueError as e:
+            err_print_help_exit(e)
+
+        try:
+            stowed_dir = pkg_dir / relative
+            stowed_dir.parent.mkdir(parents=True, exist_ok=True)
+            su.copyfile(file, stowed_dir)
+            file.unlink()
+            file.symlink_to(stowed_dir)
+        except Exception as e:
+            print(f"-- [failed] -- '{file}' with error: {e}")
+        else:
+            success += 1
+
+    return success
 
 
 if __name__ == "__main__":
