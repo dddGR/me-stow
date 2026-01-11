@@ -269,14 +269,14 @@ def process_stow_package(
 
 
 def print_result(param: Params, total: int, success: int) -> None:
-    msg = f"-- [{success} / {total}] packages "
+    msg = f"-- [{success} / {total}] "
     match param.op:
         case Operation.INIT:
-            msg += "init"
+            msg += "packages init"
         case Operation.STOW:
-            msg += f"stowed to package {param.get_package_to_stow().name}"
+            msg += f"items stowed -> package: '{param.get_package_to_stow().name}'"
         case Operation.REMOVE:
-            msg += "removed"
+            msg += "packages removed"
 
     print(msg)
 

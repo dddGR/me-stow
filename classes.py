@@ -231,9 +231,7 @@ class Params:
         return self.packages[0]
 
     def find_all_packages(self) -> None:
-        for entry in self.source_dir.iterdir():
-            if entry.is_dir():
-                self.packages.append(entry)
+        self.packages = [d for d in self.source_dir.iterdir() if d.is_dir()]
 
     def print_all_packages(self) -> None:
         print(f"\nPackages to stow : [{len(self.packages)}]")
