@@ -16,6 +16,7 @@ class Arguments:
     REMOVE = "remove"
     STOW = "stow"
     HELP = "help"
+    LIST = "list"
     VERBOSE = "verbose"
     FORCE = "force"
     RESOLVE = "resolve"
@@ -35,6 +36,7 @@ class Operation(Enum):
     INIT = Arguments.INIT
     REMOVE = Arguments.REMOVE
     STOW = Arguments.STOW
+    LIST = Arguments.LIST
 
 
 @dataclass
@@ -62,8 +64,12 @@ class Params:
         self.eval_operation()
 
         if self.verbose:
-            print(f"Running op: '{self.op.value}'")
+            print(f"-- Current source: '{self.source_dir}'")
+            print(f"-- Current root: '{self.root}'")
+            print(f"-- Running op: '{self.op.value}'")
             self.print_all_packages()
+            if self.op == Operation.LIST:
+                sys.exit(0)
 
     def assign_configurations(self, config_file: Path):
         """
@@ -128,6 +134,8 @@ class Params:
                         self.op = Operation(key)
                     case Arguments.HELP:
                         self.op = Operation.HELP
+                    case Arguments.LIST:
+                        self.op = Operation.LIST
                     case Arguments.VERBOSE:
                         self.verbose = True
                     case Arguments.FORCE:
@@ -175,6 +183,10 @@ class Params:
             case Operation.HELP:
                 return
 
+            case Operation.LIST:
+                self.get_all = True
+                self.verbose = True
+
             case Operation.STOW:
                 if (leng := len(self.packages)) != 1:
                     raise ValueError(
@@ -220,7 +232,7 @@ class Params:
                 self.packages.append(entry)
 
     def print_all_packages(self) -> None:
-        print("\nPackages to stow:")
+        print(f"\nPackages to stow : [{len(self.packages)}]")
         for pkg in self.packages:
             name = f"'{pkg.name}'"
             print(name, "-" * (40 - (len(name))))
