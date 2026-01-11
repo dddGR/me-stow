@@ -98,23 +98,20 @@ def main():
     print("Running `me-stow`...")
     try:
         params = Params(CONFIG_FILE)
-    except Warning:
-        print_help(exit=True)
     except ValueError as e:
         err_print_help_exit(e)
 
-    if params.verbose:
-        print(f"Running: {params.op.value}")
-        params.print_all_packages()
-
     match params.op:
+        case Operation.HELP:
+            print_help(exit=True)
+
         case Operation.INIT:
             for pkg_dir in params.packages:
                 process_init_package(params.root, pkg_dir, params.resolve)
 
             # TODO: check for failure
             num = len(params.packages)
-            print("...DONE" + (f" -- [{num}] packages stowed" if num > 1 else ""))
+            print(f" -- [{num}] packages stowed" if num > 1 else "")
 
         case Operation.REMOVE:
             for pkg_dir in params.packages:
@@ -129,6 +126,8 @@ def main():
 
     if params.save_config:
         params.save_configuration(CONFIG_FILE)
+
+    print("...DONE")
 
 
 # ============================================================ #

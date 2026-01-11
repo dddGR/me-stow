@@ -3,7 +3,7 @@ import sys
 import json
 from enum import Enum
 from dataclasses import dataclass
-from typing import Dict, List, Any
+from typing import Dict, List
 
 
 # ============================================================= #
@@ -12,14 +12,13 @@ from typing import Dict, List, Any
 
 @dataclass
 class Arguments:
+    INIT = "init"
+    REMOVE = "remove"
+    STOW = "stow"
     HELP = "help"
     VERBOSE = "verbose"
     FORCE = "force"
     RESOLVE = "resolve"
-    INIT = "init"
-    UPDATE = "update"
-    REMOVE = "remove"
-    STOW = "stow"
     SAVE_CONFIG = "save-config"
     COPY_BACK = "copy-back"
     PROCESS_ALL = "all"
@@ -32,8 +31,8 @@ class ResolveType(Enum):
 
 class Operation(Enum):
     NONE = "none"
+    HELP = Arguments.HELP
     INIT = Arguments.INIT
-    UPDATE = Arguments.UPDATE
     REMOVE = Arguments.REMOVE
     STOW = Arguments.STOW
 
@@ -56,80 +55,58 @@ class Params:
         self.packages: List[Path] = []
         self.stowers: List[Path] = []
 
-        _cfg = self.get_configurations(config_file)
-        self.source_dir = Path(_cfg[ConfigKey.SOURCE])
-        self.root = Path(_cfg[ConfigKey.ROOT])
-        self.resolve = ResolveType(_cfg[ConfigKey.RESOLVE])
-
+        self.assign_configurations(config_file)
         self.assign_user_arguments()
 
         # CHECK POINT
         self.eval_operation()
 
         if self.verbose:
-            pass
+            print(f"Running op: '{self.op.value}'")
+            self.print_all_packages()
 
-    def eval_operation(self) -> None:
-        match self.op:
-            case Operation.STOW:
-                if (leng := len(self.packages)) != 1:
-                    raise ValueError(
-                        f"stow op accept only 1 package, current: [{leng}]"
-                    )
-            case Operation.INIT | Operation.REMOVE:
-                if self.stowers:
-                    raise ValueError(f"don't pass in file when op: '{self.op.name}'")
-                if not self.packages:
-                    self.get_all = True
-
-            case Operation.NONE:
-                if not self.packages:
-                    raise ValueError("Invalid arguments!!")
-                else:
-                    self.op = Operation.INIT
-            case _:
-                raise ValueError(f"wrong op: '{self.op.name}'")
-
-        if self.get_all:
-            if self.packages:
-                raise ValueError("don't use --all with other package")
-            self.find_all_packages()
-
-    def get_configurations(self, config_file: Path) -> Dict[str, Any]:
+    def assign_configurations(self, config_file: Path):
+        """
+        Assign configurations from config file (if exist) or assign default value.
+        """
+        config: Dict[str] = {}
         try:
             with open(config_file, "r") as file:
                 config = json.load(file)
         except FileNotFoundError:
             print("[warning] -- config file not found")
-            config: Dict[str] = {}
             self.save_config = True
 
-        # DEFAULT VALUE FOR CONFIG FILE
-        if ConfigKey.SOURCE not in config:
-            print(f"[warning] -- value '{ConfigKey.SOURCE}' not found")
-            config[ConfigKey.SOURCE] = (
-                input("Input source directory: ")
+        self.source_dir = (
+            Path(config[ConfigKey.SOURCE])
+            if ConfigKey.SOURCE in config
+            else (
+                Path(input("\nInput source directory: "))
                 if (
-                    input("-- Use current directory as source [Y/n]: ")
+                    input("\n-- Use current directory as source [Y/n]: ")
                     .lower()
                     .startswith("n")
                 )
-                else str(Path.cwd())
+                else Path.cwd()
             )
-
-        if ConfigKey.ROOT not in config:
-            print(f"[warning] -- value '{ConfigKey.ROOT}' not found")
-            config[ConfigKey.ROOT] = (
-                input("Input root directory: ")
-                if input("-- Use HOME as root directory [Y/n]: ")
+        )
+        self.root = (
+            Path(config[ConfigKey.ROOT])
+            if ConfigKey.ROOT in config
+            else (
+                Path(input("\nInput root directory: "))
+                if input("\n-- Use HOME as root directory [Y/n]: ")
                 .lower()
                 .startswith("n")
-                else str(Path.home())
+                else Path.home()
             )
+        )
 
-        if ConfigKey.RESOLVE not in config:
-            print(f"[warning] -- value '{ConfigKey.RESOLVE}' not found")
-            config[ConfigKey.RESOLVE] = ResolveType.ADOPT.value
+        self.resolve = (
+            ResolveType(config[ConfigKey.RESOLVE])
+            if ConfigKey.RESOLVE in config
+            else ResolveType.ADOPT
+        )
 
         return config
 
@@ -146,7 +123,7 @@ class Params:
                     case _ if key in [op.value for op in Operation]:
                         self.op = Operation(key)
                     case Arguments.HELP:
-                        raise Warning
+                        self.op = Operation.HELP
                     case Arguments.VERBOSE:
                         self.verbose = True
                     case Arguments.FORCE:
@@ -166,14 +143,13 @@ class Params:
                     case "v":
                         self.verbose = True
                     case "h":
-                        raise Warning
+                        self.op = Operation.HELP
                 continue
 
             if (file := Path(arg).absolute()).is_file():
                 # Assume that the pass in argument is a dir path for
                 # the file that need to be stow
                 self.stowers.append(file)
-                self.op = Operation.STOW
                 continue
 
             if is_folder_name(arg):
@@ -190,6 +166,42 @@ class Params:
                 # TODO: maybe raise error here
                 print(f"[warning] -- path not exist: '{arg}'")
 
+    def eval_operation(self) -> None:
+        match self.op:
+            case Operation.STOW:
+                if (leng := len(self.packages)) != 1:
+                    raise ValueError(
+                        f"stow op accept only 1 package, current: [{leng}]"
+                    )
+            case Operation.INIT | Operation.REMOVE if self.stowers:
+                raise ValueError(f"don't pass in file when running: '{self.op.name}'")
+
+            case Operation.INIT:
+                if not self.packages:
+                    self.get_all = True
+
+            case Operation.REMOVE:
+                if not self.packages:
+                    if input("Remove all packages [y/N]: ").lower().startswith("y"):
+                        self.get_all = True
+
+            case Operation.NONE:
+                if not self.packages:
+                    raise ValueError("Invalid arguments!!")
+                elif self.stowers:
+                    self.op = Operation.STOW
+                else:
+                    self.op = Operation.INIT
+            case _:
+                raise ValueError(f"wrong op: '{self.op.name}'")
+
+        if self.get_all:
+            if self.packages:
+                raise ValueError("don't use `--all` with other package")
+            if self.op == Operation.STOW:
+                raise ValueError(f"don't use `--all` when running '{self.op.name}'")
+            self.find_all_packages()
+
     def get_package_to_stow(self) -> Path:
         return self.packages[0]
 
@@ -199,6 +211,7 @@ class Params:
                 self.packages.append(entry)
 
     def print_all_packages(self) -> None:
+        # TODO: maybe print all the file in packages
         print("Packages to stow:")
         for pkg in self.packages:
             print(f"-- {pkg.name}")
@@ -219,6 +232,18 @@ class Params:
 
     # ============================================================= #
     # MEM VARIABLES THAT NEED TO CHECK ============================ #
+    @property
+    def op(self):
+        return self._op
+
+    @op.setter
+    def op(self, value: Operation):
+        if value not in Operation:
+            raise ValueError("wrong value for 'operation'")
+        # if self.op != Operation.NONE:
+        #     raise ValueError("cannot process more than 1 operation")
+        self._op = value
+
     @property
     def resolve(self):
         return self._resolve
