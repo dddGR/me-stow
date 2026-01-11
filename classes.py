@@ -49,7 +49,7 @@ class ConfigKey:
 class Params:
     def __init__(self, config_file: Path) -> None:
         # DEFAULT PARAMS
-        self.op = Operation.NONE
+        self._op = Operation.NONE
         self.verbose = False
         self.save_config = False
         self.copy_back = False
@@ -225,12 +225,12 @@ class Params:
                 raise ValueError("don't use `--all` with other package")
             if self.op == Operation.STOW:
                 raise ValueError(f"don't use `--all` when running '{self.op.name}'")
-            self.find_all_packages()
+            self.get_all_packages()
 
     def get_package_to_stow(self) -> Path:
         return self.packages[0]
 
-    def find_all_packages(self) -> None:
+    def get_all_packages(self) -> None:
         self.packages = [d for d in self.source_dir.iterdir() if d.is_dir()]
 
     def print_all_packages(self) -> None:
@@ -265,8 +265,8 @@ class Params:
     def op(self, value: Operation):
         if value not in Operation:
             raise ValueError("wrong value for 'operation'")
-        # if self.op != Operation.NONE:
-        #     raise ValueError("cannot process more than 1 operation")
+        if self.op != Operation.NONE:
+            raise ValueError("cannot process more than 1 operation")
         self._op = value
 
     @property
