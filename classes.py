@@ -132,10 +132,6 @@ class Params:
                 match key:
                     case _ if key in [op.value for op in Operation]:
                         self.op = Operation(key)
-                    case Arguments.HELP:
-                        self.op = Operation.HELP
-                    case Arguments.LIST:
-                        self.op = Operation.LIST
                     case Arguments.VERBOSE:
                         self.verbose = True
                     case Arguments.FORCE:
@@ -286,7 +282,7 @@ class Params:
     @source_dir.setter
     def source_dir(self, path: Path):
         if not path.exists():
-            raise ValueError(f"path not exist: '{path}'")
+            raise FileNotFoundError(str(path))
         self._source_dir = path
 
     @property
@@ -296,7 +292,7 @@ class Params:
     @root.setter
     def root(self, path: Path):
         if not path.exists():
-            raise ValueError(f"path not exist: '{path}'")
+            raise FileNotFoundError(str(path))
         self._root = path
 
 

@@ -8,6 +8,9 @@ from classes import Operation, Params, ResolveType, Arguments
 
 # ============================================================= #
 # ============================================================= #
+# TODO list:
+# - what happend if multiple packages use the same file
+# - inside folder contain some relative link to file in same folder
 
 
 def print_help(exit=False, exit_code=0) -> None:
@@ -91,7 +94,7 @@ Examples:
     CMD --remove <packages-name>
     CMD --remove --copy-back <packages-name>
     CMD --remove # omit package will remove all the packages
-    
+
 """)
 
     if exit:
@@ -117,11 +120,13 @@ CONFIG_FILE = Path(__file__).resolve().parent / "config.json"
 
 
 def main():
-    print("Running `me-stow`...")
+    print("Running 'me-stow'...")
     try:
         params = Params(CONFIG_FILE)
     except ValueError as e:
         err_print_help_exit(e)
+    except FileNotFoundError as p:
+        err_print_help_exit(f"path not exist: '{p}'")
 
     success = 0
     total = len(params.packages)
@@ -142,7 +147,7 @@ def main():
             for pkg_dir in params.packages:
                 remove_stow_package(params.root, pkg_dir, params.copy_back)
                 # TODO: check for failure
-                print(f"[ok] -- package '{pkg_dir.name}' removed")
+                print(f"[ok] -- '{pkg_dir.name}' removed")
                 success += 1
 
         case Operation.STOW:
@@ -226,12 +231,11 @@ def remove_stow_package(dest_dir: Path, package: Path, restore: bool) -> None:
             # recursive call
             remove_stow_package(file_on_sys, entry, restore)
 
-        elif entry.is_file():
-            if file_on_sys.samefile(entry):
-                file_on_sys.unlink()
+        elif file_on_sys.samefile(entry):
+            file_on_sys.unlink()
 
-                if restore:
-                    su.copy(entry, file_on_sys)
+            if restore:
+                su.copy(entry, file_on_sys)
 
     try:
         dest_dir.rmdir()
