@@ -3,7 +3,7 @@ import sys
 import json
 from enum import Enum
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Generator
 
 
 # ============================================================= #
@@ -220,10 +220,12 @@ class Params:
                 self.packages.append(entry)
 
     def print_all_packages(self) -> None:
-        # TODO: maybe print all the file in packages
-        print("Packages to stow:")
+        print("\nPackages to stow:")
         for pkg in self.packages:
-            print(f"-- {pkg.name}")
+            name = f"'{pkg.name}'"
+            print(name, "-" * (40 - (len(name))))
+            for line in tree(pkg):
+                print(line)
 
     def save_configuration(self, file_dir: Path) -> None:
         config = {
@@ -294,3 +296,38 @@ def is_folder_name(name: str) -> bool:
         invalid_chars = r"/"
 
     return all(char not in invalid_chars for char in name)
+
+
+# prefix components:
+TREE_SPACE = "    "
+TREE_BRANCH = "│   "
+# pointers:
+TREE_TEE = "├── "
+TREE_LAST = "└── "
+
+
+def tree(dir_path: Path, prefix: str = "") -> Generator[str]:
+    """
+    A recursive generator, given a directory Path object will yield
+    a visual tree structure line by line with each line prefixed by
+    the same characters
+
+    Credit to: https://stackoverflow.com/a/59109706 with some modification
+    """
+    contents = list(dir_path.iterdir())
+    files = []
+    # contents each get pointers that are ├── with a final └── :
+    pointers = [TREE_TEE] * (len(contents) - 1) + [TREE_LAST]
+    for pointer, path in zip(pointers, contents):
+        out = prefix + pointer + path.name
+        if path.is_file():
+            files.append(out)
+            continue
+
+        yield out
+        extension = TREE_BRANCH if pointer == TREE_TEE else TREE_SPACE
+        # i.e. space because last, └── , above so no more |
+        yield from tree(path, prefix=prefix + extension)
+
+    for file in files:
+        yield file
