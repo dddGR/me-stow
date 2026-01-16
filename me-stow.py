@@ -29,6 +29,7 @@ def print_help(exit=False, exit_code=0) -> None:
     copy_ba = Arguments.COPY_BACK
     verbo = Arguments.VERBOSE
     he = Arguments.HELP
+    li = Arguments.LIST
     print(f"""
 ------------------------------------------------------------
 Usage:
@@ -48,7 +49,8 @@ Usage:
                     | can be use with `--copy-back` flag to replace symlink
                     | file with actual file (copy file from source to the
                     | deleted file direction).
-    
+    --{li}          List all the package currently on source directions.
+                    
     -h | --{he}     Print this help message.
 
     [options]
