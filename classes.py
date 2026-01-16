@@ -231,7 +231,11 @@ class Params:
         return self.packages[0]
 
     def get_all_packages(self) -> None:
-        self.packages = [d for d in self.source_dir.iterdir() if d.is_dir()]
+        self.packages = [
+            d
+            for d in self.source_dir.iterdir()
+            if d.is_dir() and not d.name.startswith(".")
+        ]
 
     def print_all_packages(self) -> None:
         print(f"\nPackages to stow : [{len(self.packages)}]")
