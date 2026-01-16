@@ -54,6 +54,7 @@ class Params:
         self.save_config = False
         self.copy_back = False
         self.get_all = False
+        self.list_full = False
         self.packages: List[Path] = []
         self.stowers: List[Path] = []
 
@@ -132,6 +133,9 @@ class Params:
                 match key:
                     case _ if key in [op.value for op in Operation]:
                         self.op = Operation(key)
+
+                        if val == "full":  # for LIST op only
+                            self.list_full = True
                     case Arguments.VERBOSE:
                         self.verbose = True
                     case Arguments.FORCE:
@@ -234,8 +238,9 @@ class Params:
         for pkg in self.packages:
             name = f"'{pkg.name}'"
             print(name, "-" * (40 - (len(name))))
-            for line in print_tree(pkg):
-                print(line)
+            if self.list_full:
+                for line in print_tree(pkg):
+                    print(line)
 
     def save_configuration(self, file_dir: Path) -> None:
         config = {
