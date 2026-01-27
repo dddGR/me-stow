@@ -35,7 +35,7 @@ me-stow [operation] [options] <packages>
     -h | --help     Print this help message.
 
     [options]
-    --save-config   Save config to 'configs.json', this will automatic on
+    --saveconfig    Save config to 'configs.json', this will automatic on
                     | when run script the first time or when configs.json not found.
 
     --force         Override current file on system if conflicts.
@@ -47,7 +47,7 @@ me-stow [operation] [options] <packages>
                     | override file on source (this is like `--adopt` on stow),
                     | then user can use git to compare (or restore) them.
 
-    --copy-back     Use with `remove` operation, this will copy file on source to
+    --copyback      Use with `remove` operation, this will copy file on source to
                     | the link files on the system. Like replace symlink file
                     | with actual file.
 

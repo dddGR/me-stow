@@ -20,8 +20,8 @@ class Arguments:
     VERBOSE = "verbose"
     FORCE = "force"
     RESOLVE = "resolve"
-    SAVE_CONFIG = "save-config"
-    COPY_BACK = "copy-back"
+    SAVE_CONFIG = "saveconfig"
+    COPY_BACK = "copyback"
     PROCESS_ALL = "all"
 
 
@@ -57,6 +57,7 @@ class Params:
         self.list_full = False
         self.packages: List[Path] = []
         self.stowers: List[Path] = []
+        self.exclude: List[str] = []
 
         self.assign_configurations(config_file)
         self.assign_user_arguments()
@@ -156,6 +157,8 @@ class Params:
                         self.verbose = True
                     case "h":
                         self.op = Operation.HELP
+                    case _:
+                        self.exclude.append(arg[1:])
                 continue
 
             if (file := Path(arg).absolute()).is_file():
@@ -232,9 +235,9 @@ class Params:
 
     def get_all_packages(self) -> None:
         self.packages = [
-            d
-            for d in self.source_dir.iterdir()
-            if d.is_dir() and not d.name.startswith(".")
+            p
+            for p in self.source_dir.iterdir()
+            if p.is_dir() and not p.name.startswith(".") and p.name not in self.exclude
         ]
 
     def print_all_packages(self) -> None:

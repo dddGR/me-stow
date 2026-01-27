@@ -9,7 +9,7 @@ from classes import Operation, Params, ResolveType, Arguments
 # ============================================================= #
 # ============================================================= #
 # TODO list:
-# - what happend if multiple packages use the same file
+# - what happend if multiple packages use the same file (check confict, follow symlink, if it point to file on source)
 # - inside folder contain some relative link to file in same folder
 
 
@@ -21,12 +21,12 @@ def print_help(exit=False, exit_code=0) -> None:
     i_ = Arguments.INIT
     remo = Arguments.REMOVE
     st = Arguments.STOW
-    save_conf = Arguments.SAVE_CONFIG
+    save_con = Arguments.SAVE_CONFIG
     fo_ = Arguments.FORCE
     resol = Arguments.RESOLVE
     repla = ResolveType.REPLACE.value
     ado = ResolveType.ADOPT.value
-    copy_ba = Arguments.COPY_BACK
+    copy_b = Arguments.COPY_BACK
     verbo = Arguments.VERBOSE
     he = Arguments.HELP
     li = Arguments.LIST
@@ -54,7 +54,7 @@ Usage:
     -h | --{he}     Print this help message.
 
     [options]
-    --{save_conf}   Save config to 'configs.json', this will automatic on
+    --{save_con}    Save config to 'configs.json', this will automatic on
                     | when run script the first time or when configs.json not found.
 
     --{fo_}         Override current file on system if conflicts.
@@ -66,7 +66,7 @@ Usage:
                     | override file on source (this is like `--adopt` on stow),
                     | then user can use git to compare (or restore) them.
 
-    --{copy_ba}     Use with `remove` operation, this will copy file on source to
+    --{copy_b}      Use with `remove` operation, this will copy file on source to
                     | the link files on the system. Like replace symlink file
                     | with actual file.
 
@@ -94,7 +94,7 @@ Examples:
 
     # remove package
     CMD --remove <packages-name>
-    CMD --remove --copy-back <packages-name>
+    CMD --remove --copyback <packages-name>
     CMD --remove # omit package will remove all the packages
 
 """)
