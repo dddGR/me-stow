@@ -4,6 +4,8 @@
 - [Usage](#usage)
 - [Examples](#examples)
 - [Installation](#installation)
+  - [Git clone](#git-clone)
+  - [Manual installation](#manual-installation)
   - [Optional Enhancements](#optional-enhancements)
 
 ## Description
@@ -83,6 +85,17 @@ CMD --remove # omit package will remove all the packages
 ```
 
 ## Installation
+
+### Git clone
+
+```bash
+git clone https://github.com/dddGR/me-stow.git
+
+cd me-stow
+chmod u+x install.sh && ./install.sh
+```
+
+### Manual installation
 
 Download or copy the following files to your local machine:  
 No additional dependencies are needed beyond those included with Python.
