@@ -14,3 +14,7 @@ wheels/
 _*
 .vscode
 config.json
+
+
+# Added by cargo
+/target
