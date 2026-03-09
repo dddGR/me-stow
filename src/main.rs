@@ -3,39 +3,59 @@
 #![allow(unused_variables)]
 #![allow(dead_code)]
 
-mod args_parser;
+use std::path::PathBuf;
 
-use args_parser::{Cli, Command};
+mod args_parser;
+mod config;
+
+/* ===================================================== */
+/* CONSTANTS =========================================== */
+pub mod constants {
+    pub const NAME_FILE_CFG: &str = "me-stow.toml";
+}
 
 fn main() {
-    let cli = Cli::new();
     println!("Running 'me-stow'");
 
-    match &cli.command {
-        Command::Sync {
-            packages: package,
+    let config = config::Config::new();
+    println!("Config: {:?}", config); // TODO: delete later
+    let cli = args_parser::Cli::new();
+
+    match cli.command {
+        args_parser::Command::Sync {
+            packages,
             diff,
             force,
         } => {
-            println!(
-                "Sync '{:?}' with [{}] and force: {}",
-                package, diff, force
-            )
+            run_sync(packages, diff, force);
         }
-        Command::Stow { package, files } => {
-            println!(
-                "Stowing files: {:?} to package: '{}'",
-                files, package
-            )
+        args_parser::Command::Stow { package, files } => {
+            run_stow(package, files);
         }
-        Command::Remove { packages, copyback } => {
-            println!(
-                "Removing package: {:?} with copyback: '{}'",
-                packages, copyback
-            )
+        args_parser::Command::Remove { packages, copyback } => {
+            run_remove(packages, copyback);
         }
-        Command::List { .. } => {
-            println!("List packages")
+        args_parser::Command::List { package, verbose } => {
+            run_list(package, verbose);
         }
     }
+}
+
+fn run_list(package: Option<String>, verbose: bool) {
+    println!("List packages")
+}
+
+fn run_sync(packages: Option<Vec<String>>, diff: bool, force: bool) {
+    println!("Sync '{:?}' with [{}] and force: {}", packages, diff, force)
+}
+
+fn run_stow(package: String, files: Vec<PathBuf>) {
+    println!("Stowing files: {:?} to package: '{}'", files, package)
+}
+
+fn run_remove(packages: Vec<String>, copyback: bool) {
+    println!(
+        "Removing package: {:?} with copyback: '{}'",
+        packages, copyback
+    )
 }

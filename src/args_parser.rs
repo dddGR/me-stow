@@ -1,3 +1,6 @@
+/* ===================================================== */
+/* ARGS PARSER ========================================= */
+
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -8,6 +11,7 @@ pub struct Cli {
     pub command: Command,
 }
 
+#[allow(clippy::new_without_default)]
 impl Cli {
     pub fn new() -> Self {
         Cli::parse()
@@ -54,6 +58,6 @@ pub enum Command {
 
         /// List all the files include in packages
         #[arg(short, long, action = clap::ArgAction::SetTrue)]
-        all: bool,
+        verbose: bool,
     },
 }
