@@ -17,11 +17,11 @@ pub enum Resolver {
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct Config {
     /// Path to store stower packages
-    path_source: PathBuf,
+    pub path_source: PathBuf,
     /// Path to act as root for stow package, usually $HOME
-    path_root: PathBuf,
+    pub path_root: PathBuf,
     /// Method to resolve conflict
-    resolver: Resolver,
+    pub resolver: Resolver,
 }
 
 impl Default for Config {
@@ -73,8 +73,7 @@ impl Config {
                 .interact()
                 .unwrap_or(true)
             {
-                // config.save_config(f_config_default.as_path());
-                config.save_config(Path::new("save_config.toml")); // TODO: change after test
+                config.save_config(f_config_default.as_path());
             }
 
             config

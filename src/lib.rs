@@ -31,8 +31,7 @@ pub mod error {
 
         /// Mark error as `Fatal`, print error and exit program
         pub fn fatal_err(&self) -> ! {
-            super::log::fatal(self);
-            std::process::exit(-1);
+            super::log::fatal(self)
         }
     }
 }
@@ -51,7 +50,7 @@ pub mod log {
     }
 
     #[inline]
-    pub fn fatal<S: Display>(msg: S) {
+    pub fn fatal<S: Display>(msg: S) -> ! {
         printout!(msg, style("fatal").yellow().on_red());
         std::process::exit(-1)
     }

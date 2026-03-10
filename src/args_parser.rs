@@ -20,12 +20,13 @@ impl Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Sync packages in source with system
+    /// Desc: Sync packages in source with system
     Sync {
-        /// Name of packages to deploy, omit will deploy all
+        /// Name of packages to deploy, omit will deploy all.
+        /// Can provide multiple packages.
         packages: Option<Vec<String>>,
 
-        /// Check for differences only
+        /// Only check for differences, no file will change on system.
         #[arg(short, long, action = clap::ArgAction::SetTrue)]
         diff: bool,
 
@@ -33,17 +34,20 @@ pub enum Command {
         #[arg(short, long, action = clap::ArgAction::SetTrue)]
         force: bool,
     },
-    /// Stow files to package
+    /// Desc: Stow files into package
     Stow {
         /// Name of package to stow
         package: String,
 
-        /// Files to stow to that package
+        /// Files to stow to that package.
+        /// Can stow multiple files each run.
         files: Vec<PathBuf>,
     },
-    /// Remove selected packages
+    /// Desc: Remove selected packages
     Remove {
-        /// Name of packages to remove
+        /// Name of package to remove.
+        ///
+        /// NOTE: only one package each run
         packages: Vec<String>,
 
         /// Copy file actual file back to the system
@@ -51,13 +55,13 @@ pub enum Command {
         copyback: bool,
     },
 
-    /// List all current packages
+    /// Desc: List all current packages
     List {
         /// Name of package to list, omit will list all
         package: Option<String>,
 
         /// List all the files include in packages
         #[arg(short, long, action = clap::ArgAction::SetTrue)]
-        verbose: bool,
+        full: bool,
     },
 }
