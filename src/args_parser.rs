@@ -47,13 +47,12 @@ pub enum Command {
     /// Desc: Remove selected packages
     Remove {
         /// Name of package to remove.
-        ///
-        /// NOTE: only one package each run
+        #[arg(required = true)]
         packages: Vec<String>,
 
-        /// Copy file actual file back to the system
+        /// Remove everything, include the files on the system.
         #[arg(short, long, action = clap::ArgAction::SetTrue)]
-        copyback: bool,
+        purge: bool,
     },
 
     /// Desc: List all current packages

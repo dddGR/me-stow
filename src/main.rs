@@ -105,14 +105,14 @@ fn print_all_packages(pkgs: FxHashMap<String, PathBuf>, full_list: bool) {
     );
 
     if full_list {
-    // Display everthings
-    for pkg in pkgs.values() {
-        if let Ok(tree) = tree(pkg) {
-            println!("{tree}")
-        } else {
-            log::error(format!("cannot display package: '{}'", pkg.display()));
+        // Display everthings
+        for pkg in pkgs.values() {
+            if let Ok(tree) = tree(pkg) {
+                println!("{tree}")
+            } else {
+                log::error(format!("cannot display package: '{}'", pkg.display()));
+            }
         }
-    }
         println!();
     } else {
         // Name of packages only: print 5 items in one row
@@ -267,11 +267,79 @@ fn run_stow(config: Config, pkg_name: String, files: Vec<PathBuf>) -> Option<()>
     Some(())
 }
 
-fn run_remove(config: Config, packages: Vec<String>, copyback: bool) {
-    println!(
-        "Removing package: {:?} with copyback: '{}'",
-        packages, copyback
-    )
+fn run_remove(config: Config, pkg_names: Vec<String>, purge: bool) -> Option<()> {
+    let curr_pkgs = get_all_packages(&config.path_source)?;
+
+    for pkg in pkg_names {
+        let Some(p_pkg) = curr_pkgs.get(&pkg) else {
+            log::skip(format!("package '{}' not in current packages", pkg));
+            continue;
+        };
+
+        println!("Removing package '{pkg}'");
+        let mut err = false;
+        let mut pattern = p_pkg.to_string_lossy().to_string();
+        pattern.push_str("/**/[!.]*.*");
+
+        // Get all files that in current package
+        for f_stowed in glob::glob(&pattern)
+            .expect("Failed to read glob pattern")
+            .flatten()
+        {
+            // get equivalent file on the system
+            let f_sys = if let Ok(p) = f_stowed.strip_prefix(config.path_source.join(&pkg)) {
+                config.path_root.join(p)
+            } else {
+                continue;
+            };
+
+            // if the file on systems not a symlink to the file on src package,
+            // simply ignore it.
+            if !fileio::is_link_to_same_file(&f_sys, &f_stowed) {
+                log::skip(format!(
+                    "detect file '{}', but not in stowed package!",
+                    f_sys.display()
+                ));
+                continue;
+            }
+
+            // WHEN: `purge`, simply remove everything.
+            // ELSE: copy file in src package to override file
+            // on the system (opposite with when stow)
+            // WHEN: error occur, mark err flag as true.
+            if purge {
+                if let Err(e) = fs::remove_file(&f_sys) {
+                    log::warn(format!("cannot remove file '{}': {}", f_sys.display(), e));
+                    err = true;
+                }
+                continue;
+            }
+
+            if let Err(e) = fs::rename(&f_stowed, &f_sys) {
+                log::warn(format!("cannot restore file '{}': {}", f_sys.display(), e));
+                err = true;
+            }
+        }
+
+        // IF: err NOT occur during previous operation,
+        // remove package directory and all the files that in it.
+        // IF FAIL: mark err flag is `true`
+        // and concatinate message to display as result.
+        let mut msg = String::new();
+        if !err && let Err(e) = fs::remove_dir_all(p_pkg) {
+            msg.push_str(": ");
+            msg.push_str(e.to_string().as_str());
+            err = true;
+        }
+
+        if err {
+            log::error(format!("cannot remove package '{pkg}'{msg}"));
+        } else {
+            log::sucess(format!("package '{}' removed!!", pkg));
+        }
+    }
+
+    Some(())
 }
 
 fn tree<P: AsRef<Path>>(p: P) -> std::io::Result<Tree<String>> {

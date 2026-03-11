@@ -81,12 +81,9 @@ pub mod log {
     }
 }
 
-pub mod utils {
-    use super::error::{ErrType, ResErr, ResType};
-    use std::{
-        path::{Path, PathBuf},
-        process::Command,
-    };
+pub mod fileio {
+    use super::error::{ErrType, ResErr};
+    use std::{path::Path, process::Command};
 
     pub fn run_program<I, S>(cmd: &str, args: I) -> Result<(), ErrType>
     where
@@ -100,15 +97,13 @@ pub mod utils {
     }
 
     /// Try to create a directory, skip if already exist
-    /// Otherwise return Err
-    pub fn try_make_dir(p_dir: &Path, dir_name: &str, verbose: bool) -> ResType<PathBuf> {
-        let dir = p_dir.join(dir_name);
-
-        if let Err(e) = std::fs::create_dir(&dir) {
+    /// Otherwise return Err if failed
+    pub fn try_make_dir(dest: &Path, verbose: bool) -> ResErr {
+        if let Err(e) = std::fs::create_dir_all(dest) {
             if e.kind() != std::io::ErrorKind::AlreadyExists {
-                return Err(ErrType::Generic(format!(
+                return Err(ErrType::FileRWFailed(format!(
                     "cannot make dir '{}': {}",
-                    dir.to_string_lossy(),
+                    dest.display(),
                     e
                 )));
             }
@@ -116,12 +111,12 @@ pub mod utils {
             if verbose {
                 super::log::skip(format!(
                     "make path '{}' already exists",
-                    dir.to_str().unwrap()
+                    dest.to_str().unwrap()
                 ));
             }
         }
 
-        Ok(dir)
+        Ok(())
     }
 
     /// Get all the files in `dir` with that type `ext` and move into `dest`
@@ -164,6 +159,30 @@ pub mod utils {
                 "cannot make symlink ->'{f_name}': {e}"
             ))),
             Ok(_) => Ok(()),
+        }
+    }
+
+    /// Read symlink and check if the file symlink point to is the
+    /// same file as `f_src`.
+    ///
+    /// ## Arguments
+    ///
+    /// - `f_link` (`&Path`) - link file to check.
+    /// - `f_src` (`&Path`) - source file to check.
+    ///
+    /// ## Returns
+    ///
+    /// - `True` if is the same file,
+    /// - `False` when f_link is not a link, or not exists,
+    ///   or point to different file.
+    ///
+    pub fn is_link_to_same_file(f_link: &Path, f_src: &Path) -> bool {
+        if let Ok(p1) = f_link.canonicalize()
+            && let Ok(p2) = f_src.canonicalize()
+        {
+            p1 == p2
+        } else {
+            false
         }
     }
 }
