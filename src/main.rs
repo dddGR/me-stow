@@ -9,13 +9,19 @@ mod config;
 use config::Config;
 use dialoguer::{Confirm, theme::ColorfulTheme};
 use itertools::Itertools;
-use me_stow::{fileio, log};
+use me_stow::{
+    error::{ErrType, ResErr, ResType},
+    fileio, log,
+};
 use rustc_hash::FxHashMap;
 use std::{
     fs, io,
     path::{Path, PathBuf},
 };
 use termtree::Tree;
+
+// TODO:
+// - f_sys is a link to a file that in the same dir(package)
 
 /* ===================================================== */
 /* CONSTANTS =========================================== */
@@ -24,33 +30,31 @@ pub mod constants {
 }
 
 fn main() {
-    let cfg = Config::new();
+    let config = Config::new();
     // dbg!(&c); // TODO: delete later
     let cli = args_parser::Cli::new();
 
     println!("Running 'me-stow'");
-    match cli.command {
-        args_parser::Command::Sync {
-            packages,
-            diff,
-            force,
-        } => {
-            run_sync(cfg, packages, diff, force);
-        }
-        args_parser::Command::Stow { package, files } => {
-            run_stow(cfg, package, files);
-        }
-        args_parser::Command::Remove { packages, purge } => {
-            run_remove(cfg, packages, purge);
-        }
-        args_parser::Command::List { package, full } => {
-            run_list(cfg, package, full);
+
+    #[rustfmt::skip]
+    let result = match cli.command {
+        args_parser::Command::Sync { packages, diff, force } => run_sync(config, packages, diff, force),
+        args_parser::Command::Stow { package, files } => run_stow(config, package, files),
+        args_parser::Command::Remove { packages, purge } => run_remove(config, packages, purge),
+        args_parser::Command::List { package, full } => run_list(config, package, full),
+    };
+
+    // Print result
+    match result {
+        Err(e) => e.print_err(),
+        Ok(_) => {
+            todo!()
         }
     }
 }
 
 /// Get all the packages that current in source dir
-fn get_all_packages(src_dir: &Path) -> Option<FxHashMap<String, PathBuf>> {
+fn get_all_packages(src_dir: &Path) -> ResType<FxHashMap<String, PathBuf>> {
     // GET EVERY DIR IN SOURCE THAT NOT START WITH '.'
 
     let mut map: FxHashMap<String, PathBuf> = FxHashMap::default();
@@ -71,13 +75,12 @@ fn get_all_packages(src_dir: &Path) -> Option<FxHashMap<String, PathBuf>> {
     }
 
     if map.is_empty() {
-        log::error(format!(
+        Err(ErrType::Generic(format!(
             "no package found in current source dir: '{}'",
             src_dir.display(),
-        ));
-        None
+        )))
     } else {
-        Some(map)
+        Ok(map)
     }
 }
 
@@ -89,7 +92,7 @@ fn get_package_dir<S: AsRef<str>>(src_dir: &Path, pkg_name: S) -> Option<PathBuf
         Some(p) => Some(p.to_path_buf()),
         None => {
             log::error(format!(
-                "request pkg '{}' not in current packages",
+                "request pkg '{}' not in fs",
                 pkg_name.as_ref()
             ));
             print_all_packages(curr_pkgs, false);
@@ -125,7 +128,7 @@ fn print_all_packages(pkgs: FxHashMap<String, PathBuf>, full_list: bool) {
     }
 }
 
-fn run_list(config: Config, request_pkg: Option<String>, full_list: bool) -> Option<()> {
+fn run_list(config: Config, request_pkg: Option<String>, full_list: bool) -> ResErr {
     let curr_pkgs = get_all_packages(&config.path_source)?;
 
     // Request to print only one package
@@ -135,7 +138,7 @@ fn run_list(config: Config, request_pkg: Option<String>, full_list: bool) -> Opt
                 println!("Package {tree}")
             }
         } else {
-            log::error(format!("request pkg '{pkg_name}' not in current packages"));
+            log::error(format!("request pkg '{pkg_name}' not in stowed packages"));
             print_all_packages(curr_pkgs, false);
         }
     } else {
@@ -144,46 +147,171 @@ fn run_list(config: Config, request_pkg: Option<String>, full_list: bool) -> Opt
         print_all_packages(curr_pkgs, full_list);
     }
 
-    Some(())
+    Ok(())
 }
 
-fn run_sync(config: Config, packages: Option<Vec<String>>, diff: bool, force: bool) {
+fn run_sync(config: Config, packages: Option<Vec<String>>, diff: bool, force: bool) -> ResErr {
+    let curr_pkgs = get_all_packages(&config.path_source)?;
+    let total = curr_pkgs.len();
+    let mut request = total;
+    let mut sucess = 0;
+
+    if let Some(pkgs) = packages {
+        request = pkgs.len();
+        // User request specific packages
+        for pkg in pkgs {
+            if let Some(d_pkg) = curr_pkgs.get(&pkg) {
+                if let Err(e) = sync_package(&config, d_pkg, diff, force) {
+                    log::error(format!("package '{pkg}' failed to sync: {e}"));
+                } else {
+                    sucess += 1;
+                }
+            } else {
+                log::skip(format!("request pkg '{}' not in stowed packages", &pkg));
+            }
+        }
+    } else {
+        // No package specify, sync all
+        for (name, d_pkg) in curr_pkgs.iter() {
+            if let Err(e) = sync_package(&config, d_pkg, diff, force) {
+                log::error(format!("package '{name}' failed to sync: {e}"));
+            } else {
+                sucess += 1;
+            }
+        }
+    }
+
+    println!("Synced [{sucess}/{request}] over total [{total}] packages.");
+    Ok(())
+}
+
+fn sync_package(config: &Config, pkg_dir: &Path, diff: bool, force: bool) -> ResErr {
+    let pkg_name = pkg_dir.file_name().unwrap();
     println!(
-        "Sync '{:?}' with [diff: {}] and force: {}",
-        packages, diff, force
-    )
+        "Sync package [{}]:",
+        console::style(pkg_name.display()).blue()
+    );
+
+    let mut pattern = pkg_dir.to_string_lossy().to_string();
+    pattern.push_str("/**/*");
+
+    let all_files = match glob::glob(&pattern) {
+        Err(e) => {
+            return Err(ErrType::Generic(format!(
+                "bad glob pattern '{pattern}': {e}"
+            )));
+        }
+        Ok(p) => p.flatten().filter(|p| p.is_file()),
+    };
+
+    // Get all files that in current package
+    for f_stowed in all_files {
+        // get equivalent file on the system
+        let p_relative = f_stowed
+            .strip_prefix(pkg_dir)
+            .expect("f_stowed get from globbing pkg_dir, this never fail");
+        let f_sys = config.path_root.join(p_relative);
+
+        // IF: file on systems is a symlink to the file on src package,
+        // (aka. already stowed), simply ignore it.
+        // WHEN: user just want to check differences, print result only
+        let is_same_file = fileio::is_link_to_same_file(&f_sys, &f_stowed);
+        if diff {
+            let status = if is_same_file {
+                console::style(" SYNCED ").green()
+            } else {
+                console::style("NOT SYNC").blue()
+            };
+            println!("[{}] -- '{}'", status, p_relative.display());
+            continue;
+        }
+
+        if is_same_file {
+            continue;
+        }
+
+        // log::info(format!(
+        //     "stowing to [{}] <- '{}'",
+        //     pkg_name.display(),
+        //     f_sys.display()
+        // )); // Too verbose
+
+        // WHEN: user want to force src file on to the system,
+        // remove the file that currenly on the system (if any).
+        // OTHERWISE: will fallback to resolver method
+        match force || config.resolver.is_replace() {
+            true => {
+                if let Err(e) = fs::remove_file(&f_sys)
+                    && e.kind() != io::ErrorKind::NotFound
+                {
+                    log::warn(format!("cannot delete file '{}': {}", f_sys.display(), e));
+                    continue;
+                }
+            }
+            false => {
+                if let Err(e) = fs::rename(&f_sys, &f_stowed)
+                    && e.kind() != io::ErrorKind::NotFound
+                {
+                    log::warn(format!("cannot move file '{}': {}", f_sys.display(), e));
+                    continue;
+                }
+            }
+        }
+
+        if let Err(e) = symlink_rs::symlink_file(&f_stowed, &f_sys) {
+            log::error(format!(
+                "cannot make symlink '{}' -> '{}': {}",
+                f_sys.display(),
+                f_stowed.display(),
+                e
+            ));
+            continue;
+        }
+
+        log::sucess(format!("file '{}' sucessfully stowed.", f_sys.display()));
+    }
+
+    Ok(())
 }
 
-fn run_stow(config: Config, pkg_name: String, files: Vec<PathBuf>) -> Option<()> {
+fn run_stow(config: Config, pkg_name: String, files: Vec<PathBuf>) -> ResErr {
     // FIRST: Get the path of the package in current src packages
-    // IF: the request package not found, ask user to create a new one.
-    // or quit, maybe argument is not type in correctly.
+    // IF: the request package not found, or no packages at all (start fresh)
+    // ask user to create a new one. or quit.
     let p_pkg = {
-        let curr_pkgs = get_all_packages(&config.path_source)?;
-        if let Some(path) = curr_pkgs.get(&pkg_name) {
-            path.to_path_buf()
-        } else {
-            log::warn(format!(
-                "request pkg '{}' not in current packages",
-                &pkg_name
-            ));
-            print_all_packages(curr_pkgs, false);
+        let mut not_found = true;
+        let mut p_pkg = PathBuf::new();
 
+        println!();
+        if let Ok(curr_pkgs) = get_all_packages(&config.path_source) {
+            if let Some(path) = curr_pkgs.get(&pkg_name) {
+                p_pkg = path.to_path_buf();
+                not_found = false;
+            } else {
+                log::warn(format!(
+                    "request pkg '{}' not in stowed packages",
+                    &pkg_name
+                ));
+                print_all_packages(curr_pkgs, false);
+            }
+        }
+
+        if not_found {
             if !Confirm::with_theme(&ColorfulTheme::default())
                 .with_prompt(format!("Create new package with name [{}]:", &pkg_name))
                 .default(false)
                 .interact()
                 .unwrap_or(false)
             {
-                return None;
+                return Err(ErrType::UserAbort);
             }
 
-            let path = config.path_source.join(pkg_name);
-            fs::create_dir(&path).expect(
+            p_pkg = config.path_source.join(pkg_name);
+            fs::create_dir(&p_pkg).expect(
                 "this only create ONE empty dir, if failed here mean something really wrong",
             );
-            path
         }
+        p_pkg
     };
 
     println!(
@@ -264,34 +392,41 @@ fn run_stow(config: Config, pkg_name: String, files: Vec<PathBuf>) -> Option<()>
 
         // TODO: maybe do cleanup if fail halfway.
     }
-    Some(())
+    Ok(())
 }
 
-fn run_remove(config: Config, pkg_names: Vec<String>, purge: bool) -> Option<()> {
+fn run_remove(config: Config, pkg_names: Vec<String>, purge: bool) -> ResErr {
     let curr_pkgs = get_all_packages(&config.path_source)?;
 
     for pkg in pkg_names {
         let Some(p_pkg) = curr_pkgs.get(&pkg) else {
-            log::skip(format!("package '{}' not in current packages", pkg));
+            log::skip(format!("package '{}' not in stowed packages", pkg));
             continue;
         };
 
         println!("Removing package '{pkg}'");
         let mut err = false;
+
         let mut pattern = p_pkg.to_string_lossy().to_string();
-        pattern.push_str("/**/[!.]*.*");
+        pattern.push_str("/**/*");
+
+        let all_files = match glob::glob(&pattern) {
+            Err(e) => {
+                return Err(ErrType::Generic(format!(
+                    "bad glob pattern '{pattern}': {e}"
+                )));
+            }
+            Ok(p) => p.flatten().filter(|p| p.is_file()),
+        };
 
         // Get all files that in current package
-        for f_stowed in glob::glob(&pattern)
-            .expect("Failed to read glob pattern")
-            .flatten()
-        {
+        for f_stowed in all_files {
             // get equivalent file on the system
-            let f_sys = if let Ok(p) = f_stowed.strip_prefix(config.path_source.join(&pkg)) {
-                config.path_root.join(p)
-            } else {
-                continue;
-            };
+            let f_sys = config.path_root.join(
+                f_stowed
+                    .strip_prefix(p_pkg)
+                    .expect("f_stowed get from globbing pkg_dir, this never fail"),
+            );
 
             // if the file on systems not a symlink to the file on src package,
             // simply ignore it.
@@ -339,7 +474,7 @@ fn run_remove(config: Config, pkg_names: Vec<String>, purge: bool) -> Option<()>
         }
     }
 
-    Some(())
+    Ok(())
 }
 
 fn tree<P: AsRef<Path>>(p: P) -> std::io::Result<Tree<String>> {

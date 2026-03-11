@@ -6,6 +6,7 @@ pub mod error {
 
     #[derive(Debug, PartialEq)]
     pub enum ErrType {
+        UserAbort,
         Generic(String),
         FileRWFailed(String),
         BadConfigFile(String),
@@ -15,6 +16,7 @@ pub mod error {
     impl std::fmt::Display for ErrType {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             let msg = match self {
+                Self::UserAbort => "peacefully exit...",
                 Self::Generic(s) => s,
                 Self::ExternProgram(s) => s,
                 Self::FileRWFailed(s) => s,
@@ -26,7 +28,11 @@ pub mod error {
 
     impl ErrType {
         pub fn print_err(&self) {
-            super::log::error(self);
+            if self == &ErrType::UserAbort {
+                super::log::info(self)
+            } else {
+                super::log::error(self);
+            }
         }
 
         /// Mark error as `Fatal`, print error and exit program
