@@ -7,11 +7,23 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Resolver {
+    /// Adopt file on the system into stow src.
     Adopt,
+    /// Replace file on the system with the file currently in src.
     Replace,
+}
+
+impl Resolver {
+    pub fn is_adopt(&self) -> bool {
+        self == &Resolver::Adopt
+    }
+
+    pub fn is_replace(&self) -> bool {
+        self == &Resolver::Replace
+    }
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]

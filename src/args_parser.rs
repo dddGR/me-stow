@@ -41,6 +41,7 @@ pub enum Command {
 
         /// Files to stow to that package.
         /// Can stow multiple files each run.
+        #[arg(required = true)]
         files: Vec<PathBuf>,
     },
     /// Desc: Remove selected packages
