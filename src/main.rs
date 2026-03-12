@@ -30,18 +30,20 @@ pub mod constants {
 }
 
 fn main() {
+    use args_parser::{Cli, Command};
+
     let config = Config::new();
     // dbg!(&c); // TODO: delete later
-    let cli = args_parser::Cli::new();
+    let cli = Cli::new();
 
     println!("Running 'me-stow'");
 
     #[rustfmt::skip]
     let result = match cli.command {
-        args_parser::Command::Sync { packages, diff, force } => run_sync(config, packages, diff, force),
-        args_parser::Command::Stow { package, files } => run_stow(config, package, files),
-        args_parser::Command::Remove { packages, purge } => run_remove(config, packages, purge),
-        args_parser::Command::List { package, full } => run_list(config, package, full),
+        Command::Sync { packages, diff, force } => run_sync(config, packages, diff, force),
+        Command::Stow { package, paths }        => run_stow(config, package, paths),
+        Command::Remove { packages, purge }     => run_remove(config, packages, purge),
+        Command::List { package, full }         => run_list(config, package, full),
     };
 
     // Print result
@@ -83,23 +85,6 @@ fn get_all_packages(src_dir: &Path) -> ResType<FxHashMap<String, PathBuf>> {
         Ok(map)
     }
 }
-
-/* /// Get package dir, only if that package currently in source dir
-fn get_package_dir<S: AsRef<str>>(src_dir: &Path, pkg_name: S) -> Option<PathBuf> {
-    let curr_pkgs = get_all_packages(src_dir)?;
-
-    match curr_pkgs.get(pkg_name.as_ref()) {
-        Some(p) => Some(p.to_path_buf()),
-        None => {
-            log::error(format!(
-                "request pkg '{}' not in fs",
-                pkg_name.as_ref()
-            ));
-            print_all_packages(curr_pkgs, false);
-            None
-        }
-    }
-} */
 
 fn print_all_packages(pkgs: FxHashMap<String, PathBuf>, full_list: bool) {
     println!(
@@ -188,14 +173,12 @@ fn run_sync(config: Config, packages: Option<Vec<String>>, diff: bool, force: bo
 fn sync_package(config: &Config, pkg_dir: &Path, diff: bool, force: bool) -> ResErr {
     let pkg_name = pkg_dir.file_name().unwrap();
     println!(
-        "Sync package [{}]:",
+        "Syncing package [{}]:",
         console::style(pkg_name.display()).blue()
     );
 
-    let mut pattern = pkg_dir.to_string_lossy().to_string();
-    pattern.push_str("/**/*");
-
-    let all_files = match glob::glob(&pattern) {
+    let pattern = format!("{}/**/*", pkg_dir.display());
+    let files_globbed = match glob::glob(&pattern) {
         Err(e) => {
             return Err(ErrType::Generic(format!(
                 "bad glob pattern '{pattern}': {e}"
@@ -204,8 +187,7 @@ fn sync_package(config: &Config, pkg_dir: &Path, diff: bool, force: bool) -> Res
         Ok(p) => p.flatten().filter(|p| p.is_file()),
     };
 
-    // Get all files that in current package
-    for f_stowed in all_files {
+    for f_stowed in files_globbed {
         // get equivalent file on the system
         let p_relative = f_stowed
             .strip_prefix(pkg_dir)
@@ -215,7 +197,7 @@ fn sync_package(config: &Config, pkg_dir: &Path, diff: bool, force: bool) -> Res
         // IF: file on systems is a symlink to the file on src package,
         // (aka. already stowed), simply ignore it.
         // WHEN: user just want to check differences, print result only
-        let is_same_file = fileio::is_link_to_same_file(&f_sys, &f_stowed);
+        let is_same_file = fileio::is_the_same_file(&f_sys, &f_stowed);
         if diff {
             let status = if is_same_file {
                 console::style(" SYNCED ").green()
@@ -230,15 +212,9 @@ fn sync_package(config: &Config, pkg_dir: &Path, diff: bool, force: bool) -> Res
             continue;
         }
 
-        // log::info(format!(
-        //     "stowing to [{}] <- '{}'",
-        //     pkg_name.display(),
-        //     f_sys.display()
-        // )); // Too verbose
-
         // WHEN: user want to force src file on to the system,
         // remove the file that currenly on the system (if any).
-        // OTHERWISE: will fallback to resolver method
+        // OTHERWISE: fallback to resolver method
         match force || config.resolver.is_replace() {
             true => {
                 if let Err(e) = fs::remove_file(&f_sys)
@@ -274,19 +250,17 @@ fn sync_package(config: &Config, pkg_dir: &Path, diff: bool, force: bool) -> Res
     Ok(())
 }
 
-fn run_stow(config: Config, pkg_name: String, files: Vec<PathBuf>) -> ResErr {
+fn run_stow(config: Config, pkg_name: String, paths: Vec<PathBuf>) -> ResErr {
     // FIRST: Get the path of the package in current src packages
     // IF: the request package not found, or no packages at all (start fresh)
     // ask user to create a new one. or quit.
     let p_pkg = {
-        let mut not_found = true;
-        let mut p_pkg = PathBuf::new();
+        let mut temp_path: Option<PathBuf> = None;
 
-        println!();
+        println!(); // for spacing in terminal, easier to read.
         if let Ok(curr_pkgs) = get_all_packages(&config.path_source) {
             if let Some(path) = curr_pkgs.get(&pkg_name) {
-                p_pkg = path.to_path_buf();
-                not_found = false;
+                temp_path.replace(path.to_path_buf());
             } else {
                 log::warn(format!(
                     "request pkg '{}' not in stowed packages",
@@ -296,7 +270,7 @@ fn run_stow(config: Config, pkg_name: String, files: Vec<PathBuf>) -> ResErr {
             }
         }
 
-        if not_found {
+        if temp_path.is_none() {
             if !Confirm::with_theme(&ColorfulTheme::default())
                 .with_prompt(format!("Create new package with name [{}]:", &pkg_name))
                 .default(false)
@@ -306,27 +280,54 @@ fn run_stow(config: Config, pkg_name: String, files: Vec<PathBuf>) -> ResErr {
                 return Err(ErrType::UserAbort);
             }
 
-            p_pkg = config.path_source.join(pkg_name);
-            fs::create_dir(&p_pkg).expect(
-                "this only create ONE empty dir, if failed here mean something really wrong",
-            );
+            let p = config.path_source.join(pkg_name);
+            fs::create_dir(&p)
+                .expect("this only create ONE empty dir, if fail here mean something really wrong");
+            temp_path.replace(p);
         }
-        p_pkg
+
+        temp_path.expect("this should always be Some(path) now")
+    };
+
+    // IF: user provide directory specific (or along with file)
+    // expand that directory into all the files that in it.
+    let files = {
+        let mut temp_v: Vec<PathBuf> = Vec::new();
+        for p in paths {
+            if p.is_dir() {
+                let pattern = format!("{}/**/*", p.display());
+                if let Ok(glob) = glob::glob(&pattern) {
+                    temp_v.append(
+                        glob.flatten()
+                            .filter(|p| p.is_file())
+                            .collect::<Vec<PathBuf>>()
+                            .as_mut(),
+                    );
+                }
+            } else if p.exists() {
+                temp_v.push(p);
+            } else {
+                log::skip(format!("not valid path '{}'", p.display()));
+            }
+        }
+        temp_v
     };
 
     println!(
-        "\nStowing files: {:#?} to package: '{}'",
+        "\nStowing [{:02}] files: {:#?} to package: '{}'",
+        console::style(files.len()).green(),
         files,
-        p_pkg.file_name().unwrap().display()
+        console::style(p_pkg.file_name().unwrap().display()).blue()
     );
-    // Get the relative path from the file to root dir.
-    // Try to make parent dirs in source dir if not exists.
-    // Move file (on system) to src
-    // Make symlink back to original dest file in system.
 
-    // TODO: HANDLE
-    // - user provide dir not file
-
+    // Try to trim the root_path from file to get relative path (like in GNU stow)
+    //   and concatinate equivalent path on stow package src dir.
+    // IF: the file on stowed package (f_stow_dest) exists and
+    //   is the same as the file on system (f_sys).
+    //   This mean that `f_sys` is already stowed.
+    // BUT IF: it is not the same file, then will resolve with method below.
+    // AND THEN: simply move(copy and delete) the `f_sys` to stow package dir,
+    //   and replace that with a symlink to `f_stow_dest`
     for f_sys in files {
         let f_stow_dest = match f_sys.strip_prefix(&config.path_root) {
             Ok(p) => p_pkg.join(p),
@@ -340,20 +341,14 @@ fn run_stow(config: Config, pkg_name: String, files: Vec<PathBuf>) -> ResErr {
             }
         };
 
-        match f_sys.canonicalize() {
-            Ok(f) if f == f_stow_dest => {
-                // This only happend when the file on system is a symlink
-                // and it's point to file that in src directory
-                log::skip(format!("file '{}' is already stowed!!", f_sys.display()));
-                continue;
-            }
-            Err(e) => {
-                log::skip(format!("not valid path '{}': {}", f_sys.display(), e));
-                continue;
-            }
-            _ => {}
+        // Check `f_sys` is not alredy stowed.
+        if fileio::is_the_same_file(&f_sys, &f_stow_dest) {
+            log::skip(format!("file '{}' is already stowed!!", f_sys.display()));
+            continue;
         }
 
+        /* From now, when error, it's system runtime error,
+        the error will mark as fatal and stop execution. */
         let parent_path = f_stow_dest.parent().expect("this should never fail.");
         if let Err(e) = fs::create_dir_all(parent_path)
             && e.kind() != io::ErrorKind::AlreadyExists
@@ -361,10 +356,10 @@ fn run_stow(config: Config, pkg_name: String, files: Vec<PathBuf>) -> ResErr {
             log::fatal(format!("cannot make directory: {e}"))
         }
 
-        // When adopt, file on system will replace file in src
-        // use COPY and then REMOVE here bc: in case of f_sys is
-        // a symlink to somewhere else, then content will be copy
-        // and then only remove the f_sys.
+        // WHEN: adopt, file on system will replace file in src
+        //  use COPY and then REMOVE here bc: in case of f_sys is
+        //  a symlink to somewhere else, then content will be copy
+        //  and then only remove the f_sys.
         // (original src that f_sys link from is left untouch)
         if (!f_stow_dest.exists() || config.resolver.is_adopt())
             && let Err(e) = fs::copy(&f_sys, &f_stow_dest)
@@ -405,11 +400,9 @@ fn run_remove(config: Config, pkg_names: Vec<String>, purge: bool) -> ResErr {
         };
 
         println!("Removing package '{pkg}'");
+
         let mut err = false;
-
-        let mut pattern = p_pkg.to_string_lossy().to_string();
-        pattern.push_str("/**/*");
-
+        let pattern = format!("{}/**/*", p_pkg.display());
         let all_files = match glob::glob(&pattern) {
             Err(e) => {
                 return Err(ErrType::Generic(format!(
@@ -430,7 +423,7 @@ fn run_remove(config: Config, pkg_names: Vec<String>, purge: bool) -> ResErr {
 
             // if the file on systems not a symlink to the file on src package,
             // simply ignore it.
-            if !fileio::is_link_to_same_file(&f_sys, &f_stowed) {
+            if !fileio::is_the_same_file(&f_sys, &f_stowed) {
                 log::skip(format!(
                     "detect file '{}', but not in stowed package!",
                     f_sys.display()

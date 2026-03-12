@@ -179,10 +179,10 @@ pub mod fileio {
     /// ## Returns
     ///
     /// - `True` if is the same file,
-    /// - `False` when f_link is not a link, or not exists,
+    /// - `False` when `f_link` or `f_src` not exists,
     ///   or point to different file.
     ///
-    pub fn is_link_to_same_file(f_link: &Path, f_src: &Path) -> bool {
+    pub fn is_the_same_file(f_link: &Path, f_src: &Path) -> bool {
         if let Ok(p1) = f_link.canonicalize()
             && let Ok(p2) = f_src.canonicalize()
         {

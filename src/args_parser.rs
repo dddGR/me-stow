@@ -40,9 +40,9 @@ pub enum Command {
         package: String,
 
         /// Files to stow to that package.
-        /// Can stow multiple files each run.
+        /// If provide directory, this will stow every files in that dir.
         #[arg(required = true)]
-        files: Vec<PathBuf>,
+        paths: Vec<PathBuf>,
     },
     /// Desc: Remove selected packages
     Remove {
