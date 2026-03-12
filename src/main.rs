@@ -1,8 +1,3 @@
-/* DEV ONLY */
-#![allow(unused_imports)]
-#![allow(unused_variables)]
-#![allow(dead_code)]
-
 mod args_parser;
 mod config;
 
@@ -33,25 +28,21 @@ fn main() {
     use args_parser::{Cli, Command};
 
     let config = Config::new();
-    // dbg!(&c); // TODO: delete later
     let cli = Cli::new();
 
     println!("Running 'me-stow'");
 
     #[rustfmt::skip]
     let result = match cli.command {
-        Command::Sync { packages, diff, force } => run_sync(config, packages, diff, force),
-        Command::Stow { package, paths }        => run_stow(config, package, paths),
-        Command::Remove { packages, purge }     => run_remove(config, packages, purge),
-        Command::List { package, full }         => run_list(config, package, full),
+        Command::Sync   { packages, diff, force } => run_sync(config, packages, diff, force),
+        Command::Stow   { package, paths }        => run_stow(config, package, paths),
+        Command::Remove { packages, purge }       => run_remove(config, packages, purge),
+        Command::List   { package, full }         => run_list(config, package, full),
     };
 
     // Print result
-    match result {
-        Err(e) => e.print_err(),
-        Ok(_) => {
-            todo!()
-        }
+    if let Err(e) = result {
+        e.print_err();
     }
 }
 
@@ -63,16 +54,15 @@ fn get_all_packages(src_dir: &Path) -> ResType<FxHashMap<String, PathBuf>> {
 
     let entries = match src_dir.read_dir() {
         Ok(t) => t.flatten(),
-        Err(e) => log::fatal(format!("cannot read source '{}': {}", src_dir.display(), e)),
+        Err(e) => log::fatal(format!("cannot read source '{}': {e}", src_dir.display())),
     };
 
-    for entry in entries {
-        let path = entry.path();
-        if path.is_dir()
-            && let Some(name) = path.file_name()
-            && !name.to_string_lossy().starts_with(".")
+    for path in entries.map(|e| e.path()).filter(|p| p.is_dir()) {
+        if let Some(name) = path.file_name()
+            && let Some(name) = name.to_str().map(|n| n.to_string())
+            && !name.starts_with(".")
         {
-            map.insert(name.to_string_lossy().to_string(), path);
+            map.insert(name, path);
         }
     }
 
@@ -94,22 +84,23 @@ fn print_all_packages(pkgs: FxHashMap<String, PathBuf>, full_list: bool) {
 
     if full_list {
         // Display everthings
-        for pkg in pkgs.values() {
-            if let Ok(tree) = tree(pkg) {
-                println!("{tree}")
-            } else {
-                log::error(format!("cannot display package: '{}'", pkg.display()));
+        for (name, d_pkg) in pkgs.iter() {
+            match tree(d_pkg) {
+                Ok(tree) => println!("{tree}"),
+                Err(e) => log::error(format!(
+                    "cannot display package: '{}': {e}",
+                    console::style(name).blue()
+                )),
             }
         }
-        println!();
     } else {
         // Name of packages only: print 5 items in one row
         for (i, p) in pkgs.keys().sorted().enumerate() {
-            print!("{:20}{}", console::style(p).blue(), {
+            print!("{:18}{}", console::style(p).blue(), {
                 if (i + 1) % 5 == 0 { "\n" } else { "" }
             });
         }
-        println!("\n");
+        println!();
     }
 }
 
@@ -120,7 +111,7 @@ fn run_list(config: Config, request_pkg: Option<String>, full_list: bool) -> Res
     if let Some(pkg_name) = request_pkg {
         if let Some(pkg) = curr_pkgs.get(&pkg_name) {
             if let Ok(tree) = tree(pkg) {
-                println!("Package {tree}")
+                println!("\nPackage:\n{tree}")
             }
         } else {
             log::error(format!("request pkg '{pkg_name}' not in stowed packages"));
@@ -128,7 +119,7 @@ fn run_list(config: Config, request_pkg: Option<String>, full_list: bool) -> Res
         }
     } else {
         // No package provide by user, print all the packages that current in source
-        // And only print package NAME if not need 'full_list'
+        // And only print package NAME if not need `full_list`
         print_all_packages(curr_pkgs, full_list);
     }
 
@@ -139,43 +130,62 @@ fn run_sync(config: Config, packages: Option<Vec<String>>, diff: bool, force: bo
     let curr_pkgs = get_all_packages(&config.path_source)?;
     let total = curr_pkgs.len();
     let mut request = total;
-    let mut sucess = 0;
+    let mut success = 0;
 
-    if let Some(pkgs) = packages {
-        request = pkgs.len();
+    if let Some(r_pkgs) = packages {
+        request = r_pkgs.len();
         // User request specific packages
-        for pkg in pkgs {
+        for pkg in r_pkgs {
             if let Some(d_pkg) = curr_pkgs.get(&pkg) {
                 if let Err(e) = sync_package(&config, d_pkg, diff, force) {
-                    log::error(format!("package '{pkg}' failed to sync: {e}"));
+                    log::error(format!(
+                        "package '{}' failed to sync: {e}",
+                        console::style(pkg).blue()
+                    ));
                 } else {
-                    sucess += 1;
+                    success += 1;
                 }
             } else {
-                log::skip(format!("request pkg '{}' not in stowed packages", &pkg));
+                log::skip(format!(
+                    "request package '{}' not in current stowed packages",
+                    console::style(&pkg).blue()
+                ));
             }
         }
     } else {
         // No package specify, sync all
         for (name, d_pkg) in curr_pkgs.iter() {
             if let Err(e) = sync_package(&config, d_pkg, diff, force) {
-                log::error(format!("package '{name}' failed to sync: {e}"));
+                log::error(format!(
+                    "package '{}' failed to sync: {e}",
+                    console::style(name).blue()
+                ));
             } else {
-                sucess += 1;
+                success += 1;
             }
         }
     }
 
-    println!("Synced [{sucess}/{request}] over total [{total}] packages.");
+    if !diff {
+        log::sucess(format!(
+            "synced [ {}/{} ] over total [{}] packages.",
+            console::style(success).green(),
+            console::style(request).green(),
+            console::style(total).blue(),
+        ));
+    }
     Ok(())
 }
 
 fn sync_package(config: &Config, pkg_dir: &Path, diff: bool, force: bool) -> ResErr {
-    let pkg_name = pkg_dir.file_name().unwrap();
-    println!(
-        "Syncing package [{}]:",
-        console::style(pkg_name.display()).blue()
-    );
+    if let Some(pkg_name) = pkg_dir.file_name() {
+        let name = console::style(pkg_name.display()).blue();
+        if diff {
+            println!("\nStatus package [[ {name} ]]:");
+        } else {
+            log::info(format!("syncing package '{name}':"));
+        }
+    }
 
     let pattern = format!("{}/**/*", pkg_dir.display());
     let files_globbed = match glob::glob(&pattern) {
@@ -220,7 +230,7 @@ fn sync_package(config: &Config, pkg_dir: &Path, diff: bool, force: bool) -> Res
                 if let Err(e) = fs::remove_file(&f_sys)
                     && e.kind() != io::ErrorKind::NotFound
                 {
-                    log::warn(format!("cannot delete file '{}': {}", f_sys.display(), e));
+                    log::warn(format!("cannot delete file '{}': {e}", f_sys.display()));
                     continue;
                 }
             }
@@ -228,7 +238,7 @@ fn sync_package(config: &Config, pkg_dir: &Path, diff: bool, force: bool) -> Res
                 if let Err(e) = fs::rename(&f_sys, &f_stowed)
                     && e.kind() != io::ErrorKind::NotFound
                 {
-                    log::warn(format!("cannot move file '{}': {}", f_sys.display(), e));
+                    log::warn(format!("cannot move file '{}': {e}", f_sys.display()));
                     continue;
                 }
             }
@@ -236,15 +246,14 @@ fn sync_package(config: &Config, pkg_dir: &Path, diff: bool, force: bool) -> Res
 
         if let Err(e) = symlink_rs::symlink_file(&f_stowed, &f_sys) {
             log::error(format!(
-                "cannot make symlink '{}' -> '{}': {}",
+                "cannot make symlink '{}' -> '{}': {e}",
                 f_sys.display(),
-                f_stowed.display(),
-                e
+                f_stowed.display()
             ));
             continue;
         }
 
-        log::sucess(format!("file '{}' sucessfully stowed.", f_sys.display()));
+        log::sucess(format!("stowed success: '{}'", f_sys.display()));
     }
 
     Ok(())
@@ -264,7 +273,7 @@ fn run_stow(config: Config, pkg_name: String, paths: Vec<PathBuf>) -> ResErr {
             } else {
                 log::warn(format!(
                     "request pkg '{}' not in stowed packages",
-                    &pkg_name
+                    console::style(&pkg_name).blue()
                 ));
                 print_all_packages(curr_pkgs, false);
             }
@@ -280,7 +289,7 @@ fn run_stow(config: Config, pkg_name: String, paths: Vec<PathBuf>) -> ResErr {
                 return Err(ErrType::UserAbort);
             }
 
-            let p = config.path_source.join(pkg_name);
+            let p = config.path_source.join(&pkg_name);
             fs::create_dir(&p)
                 .expect("this only create ONE empty dir, if fail here mean something really wrong");
             temp_path.replace(p);
@@ -313,12 +322,12 @@ fn run_stow(config: Config, pkg_name: String, paths: Vec<PathBuf>) -> ResErr {
         temp_v
     };
 
-    println!(
-        "\nStowing [{:02}] files: {:#?} to package: '{}'",
+    log::info(format!(
+        "stowing [{:02}] files: {:#?} to package: '{}'",
         console::style(files.len()).green(),
         files,
-        console::style(p_pkg.file_name().unwrap().display()).blue()
-    );
+        console::style(&pkg_name).blue()
+    ));
 
     // Try to trim the root_path from file to get relative path (like in GNU stow)
     //   and concatinate equivalent path on stow package src dir.
@@ -328,6 +337,8 @@ fn run_stow(config: Config, pkg_name: String, paths: Vec<PathBuf>) -> ResErr {
     // BUT IF: it is not the same file, then will resolve with method below.
     // AND THEN: simply move(copy and delete) the `f_sys` to stow package dir,
     //   and replace that with a symlink to `f_stow_dest`
+    let total = files.len();
+    let mut success = 0;
     for f_sys in files {
         let f_stow_dest = match f_sys.strip_prefix(&config.path_root) {
             Ok(p) => p_pkg.join(p),
@@ -365,28 +376,36 @@ fn run_stow(config: Config, pkg_name: String, paths: Vec<PathBuf>) -> ResErr {
             && let Err(e) = fs::copy(&f_sys, &f_stow_dest)
         {
             log::fatal(format!(
-                "cannot copy '{}' -> '{}': {}",
+                "cannot copy '{}' -> '{}': {e}",
                 f_sys.display(),
-                f_stow_dest.display(),
-                e
+                f_stow_dest.display()
             ))
         }
 
         if let Err(e) = fs::remove_file(&f_sys) {
-            log::fatal(format!("cannot remove file '{}':", e))
+            log::fatal(format!("cannot remove file '{}': {e}", f_sys.display()))
         }
 
         if let Err(e) = symlink_rs::symlink_file(&f_stow_dest, &f_sys) {
             log::fatal(format!(
-                "cannot make symlink '{}' -> '{}': {}",
+                "cannot make symlink '{}' -> '{}': {e}",
                 f_sys.display(),
-                f_stow_dest.display(),
-                e
+                f_stow_dest.display()
             ))
         }
 
+        log::sucess(format!("stow success: '{}'", f_sys.display()));
+        success += 1;
+
         // TODO: maybe do cleanup if fail halfway.
     }
+
+    log::sucess(format!(
+        "stowed [ {}/{} ] to package: '{}'",
+        success,
+        total,
+        console::style(pkg_name).blue()
+    ));
     Ok(())
 }
 
@@ -395,7 +414,10 @@ fn run_remove(config: Config, pkg_names: Vec<String>, purge: bool) -> ResErr {
 
     for pkg in pkg_names {
         let Some(p_pkg) = curr_pkgs.get(&pkg) else {
-            log::skip(format!("package '{}' not in stowed packages", pkg));
+            log::skip(format!(
+                "package '{}' not in stowed packages",
+                console::style(pkg).blue()
+            ));
             continue;
         };
 
@@ -403,7 +425,7 @@ fn run_remove(config: Config, pkg_names: Vec<String>, purge: bool) -> ResErr {
 
         let mut err = false;
         let pattern = format!("{}/**/*", p_pkg.display());
-        let all_files = match glob::glob(&pattern) {
+        let files = match glob::glob(&pattern) {
             Err(e) => {
                 return Err(ErrType::Generic(format!(
                     "bad glob pattern '{pattern}': {e}"
@@ -413,7 +435,7 @@ fn run_remove(config: Config, pkg_names: Vec<String>, purge: bool) -> ResErr {
         };
 
         // Get all files that in current package
-        for f_stowed in all_files {
+        for f_stowed in files {
             // get equivalent file on the system
             let f_sys = config.path_root.join(
                 f_stowed
@@ -435,17 +457,19 @@ fn run_remove(config: Config, pkg_names: Vec<String>, purge: bool) -> ResErr {
             // ELSE: copy file in src package to override file
             // on the system (opposite with when stow)
             // WHEN: error occur, mark err flag as true.
-            if purge {
-                if let Err(e) = fs::remove_file(&f_sys) {
-                    log::warn(format!("cannot remove file '{}': {}", f_sys.display(), e));
-                    err = true;
+            match purge {
+                true => {
+                    if let Err(e) = fs::remove_file(&f_sys) {
+                        log::warn(format!("cannot remove file '{}': {}", f_sys.display(), e));
+                        err = true;
+                    }
                 }
-                continue;
-            }
-
-            if let Err(e) = fs::rename(&f_stowed, &f_sys) {
-                log::warn(format!("cannot restore file '{}': {}", f_sys.display(), e));
-                err = true;
+                false => {
+                    if let Err(e) = fs::rename(&f_stowed, &f_sys) {
+                        log::warn(format!("cannot restore file '{}': {}", f_sys.display(), e));
+                        err = true;
+                    }
+                }
             }
         }
 
@@ -461,9 +485,15 @@ fn run_remove(config: Config, pkg_names: Vec<String>, purge: bool) -> ResErr {
         }
 
         if err {
-            log::error(format!("cannot remove package '{pkg}'{msg}"));
+            log::error(format!(
+                "cannot remove package '{}'{msg}",
+                console::style(pkg).blue(),
+            ));
         } else {
-            log::sucess(format!("package '{}' removed!!", pkg));
+            log::sucess(format!(
+                "package '{}' removed!!",
+                console::style(pkg).blue()
+            ));
         }
     }
 

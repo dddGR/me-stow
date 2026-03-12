@@ -20,7 +20,7 @@ impl Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Desc: Sync packages in source with system
+    /// Sync packages in source with system
     Sync {
         /// Name of packages to deploy, omit will deploy all.
         /// Can provide multiple packages.
@@ -34,7 +34,7 @@ pub enum Command {
         #[arg(short, long, action = clap::ArgAction::SetTrue)]
         force: bool,
     },
-    /// Desc: Stow files into package
+    /// Stow files into package
     Stow {
         /// Name of package to stow
         package: String,
@@ -44,7 +44,7 @@ pub enum Command {
         #[arg(required = true)]
         paths: Vec<PathBuf>,
     },
-    /// Desc: Remove selected packages
+    /// Remove selected packages
     Remove {
         /// Name of package to remove.
         #[arg(required = true)]
@@ -55,7 +55,7 @@ pub enum Command {
         purge: bool,
     },
 
-    /// Desc: List all current packages
+    /// List all current packages
     List {
         /// Name of package to list, omit will list all
         package: Option<String>,
