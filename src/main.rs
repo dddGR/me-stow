@@ -16,6 +16,7 @@ use std::{
 use termtree::Tree;
 
 // TODO:
+// - add `packages.toml` to config for each systems.
 // - f_sys is a link to a file that in the same dir(package)
 
 /* ===================================================== */
@@ -29,8 +30,6 @@ fn main() {
 
     let config = Config::new();
     let cli = Cli::new();
-
-    println!("Running 'me-stow'");
 
     #[rustfmt::skip]
     let result = match cli.command {
@@ -83,7 +82,7 @@ fn print_all_packages(pkgs: FxHashMap<String, PathBuf>, full_list: bool) {
     );
 
     if full_list {
-        // Display everthings
+        // Display everythings
         for (name, d_pkg) in pkgs.iter() {
             match tree(d_pkg) {
                 Ok(tree) => println!("{tree}"),
@@ -95,12 +94,15 @@ fn print_all_packages(pkgs: FxHashMap<String, PathBuf>, full_list: bool) {
         }
     } else {
         // Name of packages only: print 5 items in one row
+        let total = pkgs.len();
         for (i, p) in pkgs.keys().sorted().enumerate() {
-            print!("{:18}{}", console::style(p).blue(), {
-                if (i + 1) % 5 == 0 { "\n" } else { "" }
-            });
+            let name = console::style(p).blue();
+            if (i + 1) % 5 == 0 || i == total - 1 {
+                println!("> {}", name)
+            } else {
+                print!("> {:18}", name)
+            }
         }
-        println!();
     }
 }
 
@@ -154,7 +156,7 @@ fn run_sync(config: Config, packages: Option<Vec<String>>, diff: bool, force: bo
         }
     } else {
         // No package specify, sync all
-        for (name, d_pkg) in curr_pkgs.iter() {
+        for (name, d_pkg) in curr_pkgs.iter().sorted() {
             if let Err(e) = sync_package(&config, d_pkg, diff, force) {
                 log::error(format!(
                     "package '{}' failed to sync: {e}",
@@ -167,6 +169,7 @@ fn run_sync(config: Config, packages: Option<Vec<String>>, diff: bool, force: bo
     }
 
     if !diff {
+        println!();
         log::sucess(format!(
             "synced [ {}/{} ] over total [{}] packages.",
             console::style(success).green(),
@@ -400,6 +403,7 @@ fn run_stow(config: Config, pkg_name: String, paths: Vec<PathBuf>) -> ResErr {
         // TODO: maybe do cleanup if fail halfway.
     }
 
+    println!();
     log::sucess(format!(
         "stowed [ {}/{} ] to package: '{}'",
         success,
@@ -421,7 +425,11 @@ fn run_remove(config: Config, pkg_names: Vec<String>, purge: bool) -> ResErr {
             continue;
         };
 
-        println!("Removing package '{pkg}'");
+        println!();
+        log::info(format!(
+            "removing package '{}'",
+            console::style(&pkg).blue()
+        ));
 
         let mut err = false;
         let pattern = format!("{}/**/*", p_pkg.display());
