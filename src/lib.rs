@@ -1,5 +1,5 @@
-/* ===================================================== */
-/* ERROR TYPES ========================================= */
+/* ----------------------------------------------------- */
+/* ERROR TYPES ----------------------------------------- */
 pub mod error {
     pub type ResErr = Result<(), ErrType>;
     pub type ResType<T> = Result<T, ErrType>;
@@ -42,12 +42,15 @@ pub mod error {
     }
 }
 
-/* ===================================================== */
-/* UTILS =============================================== */
+/* ----------------------------------------------------- */
+/* UTILS ----------------------------------------------- */
 #[allow(dead_code)]
 pub mod log {
     use console::style;
     use core::fmt::Display;
+    use dialoguer::{Confirm, theme::ColorfulTheme};
+
+    use crate::error::{ErrType, ResType};
 
     macro_rules! printout {
         ($msg:expr, $ctx:expr) => {
@@ -85,11 +88,38 @@ pub mod log {
     pub fn info<S: Display>(msg: S) {
         printout!(msg, style("info").cyan());
     }
+
+    #[inline]
+    pub fn msg<S: Display>(msg: S) {
+        printout!(msg, " .. ");
+    }
+
+    /// Ask user to confirmation before continue.
+    /// With msg promt and default answ.
+    /// When not `false_continue`, this will output `Err()`
+    /// that can be use with `?` to exit function
+    pub fn ask_confirm<S: Into<String>>(
+        msg: S,
+        default_yes: bool,
+        false_continue: bool,
+    ) -> ResType<bool> {
+        let user = Confirm::with_theme(&ColorfulTheme::default())
+            .with_prompt(msg)
+            .default(default_yes)
+            .interact()
+            .unwrap_or(false);
+
+        if user || false_continue {
+            Ok(user)
+        } else {
+            Err(ErrType::UserAbort)
+        }
+    }
 }
 
 pub mod fileio {
     use super::error::{ErrType, ResErr};
-    use std::{path::Path, process::Command};
+    use std::{fs, io, path::Path, process::Command};
 
     pub fn run_program<I, S>(cmd: &str, args: I) -> Result<(), ErrType>
     where
@@ -106,7 +136,7 @@ pub mod fileio {
     /// Otherwise return Err if failed
     pub fn try_make_dir(dest: &Path, verbose: bool) -> ResErr {
         if let Err(e) = std::fs::create_dir_all(dest) {
-            if e.kind() != std::io::ErrorKind::AlreadyExists {
+            if e.kind() != io::ErrorKind::AlreadyExists {
                 return Err(ErrType::FileRWFailed(format!(
                     "cannot make dir '{}': {}",
                     dest.display(),
@@ -190,5 +220,61 @@ pub mod fileio {
         } else {
             false
         }
+    }
+
+    /// Cleanup directory, remove any sub dirs that are empty.
+    /// Also remove provided dir if is empty after cleanup.
+    pub fn rm_empty_dirs(path: &Path) -> ResErr {
+        // TODO: handle symlink to a dir
+        let is_symlink = match fs::symlink_metadata(path) {
+            Err(e) => return Err(ErrType::FileRWFailed(e.to_string())),
+            Ok(t) => t.file_type().is_symlink(),
+        };
+
+        if !is_symlink {
+            #[cfg(not(windows))]
+            {
+                if let Err(e) = rm_empty_dir_unix(path) {
+                    return Err(ErrType::FileRWFailed(e.to_string()));
+                }
+            }
+
+            #[cfg(windows)]
+            {
+                if let Err(e) = rm_empty_dir_wind(path) {
+                    return Err(ErrType::FileRWFailed(e.to_string()));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    // ---------------------------------------------------------- //
+    // ---------------------------------------------------------- //
+    fn rm_empty_dir_unix(path: &Path) -> io::Result<()> {
+        let subdirs = path
+            .read_dir()?
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_dir());
+
+        for dir_path in subdirs {
+            // dbg!(dir_path.display());
+            rm_empty_dir_unix(&dir_path)?;
+        }
+
+        // dbg!("run remove dir");
+        if let Err(err) = fs::remove_dir(path)
+            && err.kind() != io::ErrorKind::DirectoryNotEmpty
+        {
+            return Err(err);
+        }
+
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    fn rm_empty_dir_wind(_path: &Path) {
+        unimplemented!()
     }
 }

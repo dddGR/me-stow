@@ -1,5 +1,5 @@
-/* ===================================================== */
-/* ARGS PARSER ========================================= */
+/* ----------------------------------------------------- */
+/* ARGS PARSER ----------------------------------------- */
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -47,8 +47,15 @@ pub enum Command {
     /// Remove selected packages
     Remove {
         /// Name of package to remove.
-        #[arg(required = true)]
-        packages: Vec<String>,
+        // #[arg(required = true)]
+        packages: Option<String>,
+
+        /// File(s) to remove. Empty will remove whole package.
+        files: Option<Vec<PathBuf>>,
+
+        /// Remove all packages.
+        #[arg(long, action = clap::ArgAction::SetTrue)]
+        all: bool,
 
         /// Remove everything, include the files on the system.
         #[arg(short, long, action = clap::ArgAction::SetTrue)]

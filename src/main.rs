@@ -2,7 +2,6 @@ mod args_parser;
 mod config;
 
 use config::Config;
-use dialoguer::{Confirm, theme::ColorfulTheme};
 use itertools::Itertools;
 use me_stow::{
     error::{ErrType, ResErr, ResType},
@@ -19,8 +18,8 @@ use termtree::Tree;
 // - add `packages.toml` to config for each systems.
 // - f_sys is a link to a file that in the same dir(package)
 
-/* ===================================================== */
-/* CONSTANTS =========================================== */
+/* ----------------------------------------------------- */
+/* CONSTANTS ------------------------------------------- */
 pub mod constants {
     pub const NAME_FILE_CFG: &str = "me-stow.toml";
 }
@@ -33,10 +32,10 @@ fn main() {
 
     #[rustfmt::skip]
     let result = match cli.command {
-        Command::Sync   { packages, diff, force } => run_sync(config, packages, diff, force),
-        Command::Stow   { package, paths }        => run_stow(config, package, paths),
-        Command::Remove { packages, purge }       => run_remove(config, packages, purge),
-        Command::List   { package, full }         => run_list(config, package, full),
+        Command::Sync   { packages, diff, force }  => run_sync(config, packages, diff, force),
+        Command::Stow   { package, paths }         => run_stow(config, package, paths),
+        Command::Remove { packages, files, purge, all } => run_remove(config, packages, files, purge, all),
+        Command::List   { package, full }          => run_list(config, package, full),
     };
 
     // Print result
@@ -282,16 +281,13 @@ fn run_stow(config: Config, pkg_name: String, paths: Vec<PathBuf>) -> ResErr {
             }
         }
 
-        if temp_path.is_none() {
-            if !Confirm::with_theme(&ColorfulTheme::default())
-                .with_prompt(format!("Create new package with name [{}]:", &pkg_name))
-                .default(false)
-                .interact()
-                .unwrap_or(false)
-            {
-                return Err(ErrType::UserAbort);
-            }
-
+        if temp_path.is_none()
+            && log::ask_confirm(
+                format!("Create new package with name [{}]:", &pkg_name),
+                false,
+                false,
+            )?
+        {
             let p = config.path_source.join(&pkg_name);
             fs::create_dir(&p)
                 .expect("this only create ONE empty dir, if fail here mean something really wrong");
@@ -413,95 +409,180 @@ fn run_stow(config: Config, pkg_name: String, paths: Vec<PathBuf>) -> ResErr {
     Ok(())
 }
 
-fn run_remove(config: Config, pkg_names: Vec<String>, purge: bool) -> ResErr {
-    let curr_pkgs = get_all_packages(&config.path_source)?;
+fn run_remove(
+    config: Config,
+    package: Option<String>,
+    files: Option<Vec<PathBuf>>,
+    purge: bool,
+    is_remove_all: bool,
+) -> ResErr {
+    fn get_files_in_pkg(pkg_path: impl AsRef<Path>, pattern: Option<&str>) -> Option<Vec<PathBuf>> {
+        let pat = format!(
+            "{}/**/{}",
+            pkg_path.as_ref().display(),
+            pattern.unwrap_or("*")
+        );
+        let globs: Vec<PathBuf> = glob::glob(&pat)
+            .expect("pattern checked")
+            .flatten()
+            .filter(|p| p.is_file())
+            .collect();
 
-    for pkg in pkg_names {
-        let Some(p_pkg) = curr_pkgs.get(&pkg) else {
-            log::skip(format!(
-                "package '{}' not in stowed packages",
-                console::style(pkg).blue()
-            ));
-            continue;
-        };
+        if globs.is_empty() { None } else { Some(globs) }
+    }
 
+    fn rm_package(
+        path_root: impl AsRef<Path>,
+        pkg_name: impl AsRef<str>,
+        pkg_path: impl AsRef<Path>,
+        rm_files: Vec<PathBuf>,
+        purge: bool,
+    ) -> ResErr {
         println!();
         log::info(format!(
             "removing package '{}'",
-            console::style(&pkg).blue()
+            console::style(pkg_name.as_ref()).blue()
         ));
 
-        let mut err = false;
-        let pattern = format!("{}/**/*", p_pkg.display());
-        let files = match glob::glob(&pattern) {
-            Err(e) => {
-                return Err(ErrType::Generic(format!(
-                    "bad glob pattern '{pattern}': {e}"
-                )));
-            }
-            Ok(p) => p.flatten().filter(|p| p.is_file()),
-        };
-
-        // Get all files that in current package
-        for f_stowed in files {
+        for f_stowed in rm_files {
             // get equivalent file on the system
-            let f_sys = config.path_root.join(
-                f_stowed
-                    .strip_prefix(p_pkg)
-                    .expect("f_stowed get from globbing pkg_dir, this never fail"),
-            );
-
-            // if the file on systems not a symlink to the file on src package,
-            // simply ignore it.
-            if !fileio::is_the_same_file(&f_sys, &f_stowed) {
-                log::skip(format!(
-                    "detect file '{}', but not in stowed package!",
-                    f_sys.display()
-                ));
-                continue;
-            }
+            let path_rel = f_stowed
+                .strip_prefix(pkg_path.as_ref())
+                .expect("path is already evalutated, this never fail");
+            let f_sys = path_root.as_ref().join(path_rel);
 
             // WHEN: `purge`, simply remove everything.
             // ELSE: copy file in src package to override file
             // on the system (opposite with when stow)
-            // WHEN: error occur, mark err flag as true.
-            match purge {
+            let result = match purge {
                 true => {
-                    if let Err(e) = fs::remove_file(&f_sys) {
-                        log::warn(format!("cannot remove file '{}': {}", f_sys.display(), e));
-                        err = true;
-                    }
+                    // log::info("doing remove");
+                    fs::remove_file(&f_stowed).and_then(|_| fs::remove_file(f_sys))
                 }
                 false => {
-                    if let Err(e) = fs::rename(&f_stowed, &f_sys) {
-                        log::warn(format!("cannot restore file '{}': {}", f_sys.display(), e));
-                        err = true;
+                    // WHEN: `f_sys` is not exists or not link to `f_stowed`
+                    // this mean the file only in the stow pkg, and not related
+                    // to the file on the system (if that exists).
+                    // log::info("doing restore");
+                    if fileio::is_the_same_file(&f_sys, &f_stowed) {
+                        fs::rename(&f_stowed, f_sys)
+                    } else {
+                        fs::remove_file(&f_stowed)
                     }
                 }
+            };
+
+            // TODO: Concatinate alls the failed into a vec and return
+            if let Err(err) = result
+                && err.kind() != std::io::ErrorKind::NotFound
+            {
+                return Err(ErrType::FileRWFailed(format!(
+                    "cannot {} file '<root>/{}': {}",
+                    if purge { "remove" } else { "restore" },
+                    path_rel.display(),
+                    err
+                )));
             }
         }
 
-        // IF: err NOT occur during previous operation,
-        // remove package directory and all the files that in it.
-        // IF FAIL: mark err flag is `true`
-        // and concatinate message to display as result.
-        let mut msg = String::new();
-        if !err && let Err(e) = fs::remove_dir_all(p_pkg) {
-            msg.push_str(": ");
-            msg.push_str(e.to_string().as_str());
-            err = true;
-        }
+        Ok(())
+    }
 
-        if err {
-            log::error(format!(
-                "cannot remove package '{}'{msg}",
-                console::style(pkg).blue(),
-            ));
+    let curr_pkgs = get_all_packages(&config.path_source)?;
+    if let Some(pkg_name) = package {
+        dbg!(&pkg_name);
+        let Some(pkg_path) = curr_pkgs.get(&pkg_name) else {
+            return Err(ErrType::Generic(format!(
+                "package '{}' not in stowed packages",
+                console::style(pkg_name).blue()
+            )));
+        };
+
+        // This will store all the files that can (and will) be remove
+        // And this only store the stowed file (not path to symlink on sys)
+        // The path to symlink will be concatinate later when doing remove.
+        let mut rm_files: Vec<PathBuf> = Vec::new();
+        match files {
+            Some(f) => {
+                // When user provide file(s) to remove.
+                for p_file in f {
+                    // EVERYTHING NOT SUCCESS WILL FALL TO THE BOTTOM.
+                    if let Ok(f_stowed) = p_file.canonicalize()
+                        && f_stowed.strip_prefix(pkg_path).is_ok()
+                    {
+                        // User provide path that that in stow package or
+                        // point to the file to the file on stow package (stowed file)
+                        // pkg-path will be stripable.
+                        rm_files.push(f_stowed);
+                        continue;
+                    } else {
+                        // TRY: to match any file that in provide package
+                        // When all above failed, assume that user provide only
+                        // file(s) name (or relative path),
+                        // try to search in package for that file.
+                        let glob_finds = p_file.to_str().and_then(|p| {
+                            let pattern = p.trim_start_matches('/');
+                            get_files_in_pkg(pkg_path, Some(pattern))
+                        });
+
+                        if let Some(files) = glob_finds {
+                            rm_files.extend(files);
+                            continue;
+                        }
+                    }
+
+                    log::skip(format!("not valid file: '{}'", p_file.display()));
+                }
+            }
+            None => {
+                // User not provide file to remove
+                // Remove all files in package
+                match get_files_in_pkg(pkg_path, None) {
+                    Some(files) => rm_files = files,
+                    None => return Err(ErrType::Generic("package empty".to_string())),
+                }
+            }
+        };
+        // Print result here and wait for user comfirmation
+        if rm_files.is_empty() {
+            log::info("nothing to remove!");
         } else {
-            log::sucess(format!(
-                "package '{}' removed!!",
-                console::style(pkg).blue()
+            println!("\nRemovable files:");
+            for file in &rm_files {
+                log::sucess(format!(
+                    "'<root>/{}'",
+                    file.strip_prefix(pkg_path).unwrap().display()
+                ));
+            }
+            if log::ask_confirm("Do remove all:", false, false)? {
+                rm_package(&config.path_root, pkg_name, pkg_path, rm_files, purge)?;
+
+                // try to remove the package, if every files has been deleted
+                // the package dir will be remove, othewise, ignore
+                fileio::rm_empty_dirs(pkg_path)?;
+                // TODO: modify the package recored (when that implemented).
+            }
+        }
+    } else {
+        // Package is alway provide before file(s)
+        // if NOT Package, files is also None (no need to check)
+        if !is_remove_all {
+            return Err(ErrType::Generic(
+                "nothing to remove\nuse '--all' if you want to remove all packages".to_string(),
             ));
+        }
+        // TODO: maybe list all the current pkgs for user to confirm.
+        for (pkg_name, pkg_path) in curr_pkgs.iter() {
+            match get_files_in_pkg(pkg_path, None) {
+                None => log::skip(format!(
+                    "{}: package empty",
+                    console::style(pkg_name).blue()
+                )),
+                Some(pkg_files) => {
+                    rm_package(&config.path_root, pkg_name, pkg_path, pkg_files, purge)?;
+                    fileio::rm_empty_dirs(pkg_path)?;
+                }
+            }
         }
     }
 
