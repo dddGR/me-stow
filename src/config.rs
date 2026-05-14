@@ -1,13 +1,20 @@
-/* ===================================================== */
-/* CONFIGURATIONS READER =============================== */
+/* ----------------------------------------------------- */
+/* CONFIGURATIONS READER ------------------------------- */
 
-use dialoguer::{Confirm, Input, theme::ColorfulTheme};
-use me_stow::error::ErrType;
+use dialoguer::{Input, theme::ColorfulTheme};
+use me_stow::error::ErKind;
+use me_stow::log;
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+/* ----------------------------------------------------- */
+/* CONSTANTS ------------------------------------------- */
+mod constants {
+    pub const NAME_FILE_CFG: &str = "me-stow.toml";
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize, Clone, Copy)]
 #[serde(rename_all = "lowercase")]
 pub enum Resolver {
     /// Adopt file on the system into stow src.
@@ -34,6 +41,8 @@ pub struct Config {
     pub path_root: PathBuf,
     /// Method to resolve conflict
     pub resolver: Resolver,
+    /// List of current packages in the system
+    pub packages: Vec<String>,
 }
 
 impl Default for Config {
@@ -51,6 +60,7 @@ impl Default for Config {
             path_source: PathBuf::from(source),
             path_root: PathBuf::from(root),
             resolver: Resolver::Adopt,
+            packages: Vec::new(),
         }
     }
 }
@@ -59,70 +69,69 @@ impl Config {
     /// First try get config from default: `$HOME/.config/me-stow.toml`
     ///
     /// **CONFIG NOT EXISTS**: Create new one from default values. (if choose to do so)
-    pub fn new() -> Self {
-        let f_config_default = dirs::config_dir()
-            .expect("stop here if failed")
-            .join(super::constants::NAME_FILE_CFG);
-
-        Self::new_from_file(f_config_default.as_path()).unwrap_or_else(|e| {
-            e.print_err();
-
-            if !Confirm::with_theme(&ColorfulTheme::default())
-                .with_prompt("Create new config file:")
-                .default(true)
-                .interact()
-                .unwrap_or(false)
-            {
-                println!("Manual create config file and run again.\nExit...!!");
-                std::process::exit(0)
-            }
-
-            let config = Self::default();
-
-            if Confirm::with_theme(&ColorfulTheme::default())
-                .with_prompt("Save new config file:")
-                .default(true)
-                .interact()
-                .unwrap_or(true)
-            {
-                config.save_config(f_config_default.as_path());
-            }
-
-            config
-        })
-    }
-
-    fn new_from_file(dir: &Path) -> Result<Self, ErrType> {
-        let mut f_toml = match File::open(dir) {
-            Ok(f) => f,
-            Err(msg) => {
-                return Err(ErrType::BadConfigFile(format!(
-                    "config file not found '{}': {}",
-                    dir.display(),
-                    msg
-                )));
-            }
-        };
-
-        let mut content = String::with_capacity(512); // Approximate
-        if let Err(msg) = f_toml.read_to_string(&mut content) {
-            return Err(ErrType::BadConfigFile(format!(
-                "cannot read '{}': {}",
-                dir.display(),
-                msg
-            )));
-        }
-
-        match toml::from_str::<Config>(&content) {
+    pub fn new() -> Result<Self, ErKind> {
+        let f_config_default = Config::get_path_default();
+        match Self::new_from_file(&f_config_default) {
             Ok(config) => Ok(config),
-            Err(e) => Err(ErrType::BadConfigFile(e.message().to_string())),
+            Err(err) if matches!(err, ErKind::NotFoundConfig) => {
+                // log::warn("not found configurations file!!");
+                log::warn(err);
+                if !log::ask_confirm("Create new config file:", true, true).expect("checked") {
+                    return Err(ErKind::UserAbort(Some(
+                        "Create config file and run again.\nExit...!!",
+                    )));
+                }
+
+                let config = Self::default();
+                if log::ask_confirm("Save new config file:", true, true).expect("checked") {
+                    config.save_to_file(&f_config_default);
+                }
+
+                Ok(config)
+            }
+            Err(e) => Err(e),
         }
     }
 
-    fn save_config(&self, dir: &Path) {
+    fn get_path_default() -> PathBuf {
+        dirs::config_dir()
+            .expect("stop here if failed")
+            .join(constants::NAME_FILE_CFG)
+    }
+
+    fn new_from_file(path: &Path) -> Result<Self, ErKind> {
+        // let mut f_toml = File::open(path).map_err(|err| {
+        //     ErrType::BadConfigFile(format!("cannot open '{}': {}", path.display(), err))
+        // })?;
+
+        // let mut content = String::with_capacity(1024); // Approximate
+        // let _ = f_toml.read_to_string(&mut content).map_err(|err| {
+        //     ErrType::BadConfigFile(format!("cannot read '{}': {}", path.display(), err))
+        // })?;
+
+        let f_toml = File::open(path).map_err(|e| {
+            if e.kind() == io::ErrorKind::NotFound {
+                ErKind::NotFoundConfig
+            } else {
+                ErKind::IOFailRead(path.to_path_buf(), e.to_string())
+            }
+        })?;
+
+        let content = io::read_to_string(f_toml)
+            .map_err(|e| ErKind::IOFailRead(path.to_path_buf(), e.to_string()))?;
+
+        toml::from_str::<Config>(&content).map_err(|e| ErKind::BadConfigFile(e.to_string()))
+    }
+
+    fn save_to_file(&self, path: &Path) {
         let str_config = toml::ser::to_string(self).unwrap();
 
-        let mut f_toml = File::create(dir).unwrap();
+        let mut f_toml = File::create(path).unwrap();
         f_toml.write_all(str_config.as_bytes()).unwrap();
+    }
+
+    pub fn save(&self) {
+        let config_path = Config::get_path_default();
+        self.save_to_file(&config_path);
     }
 }

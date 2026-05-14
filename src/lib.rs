@@ -1,43 +1,116 @@
 /* ----------------------------------------------------- */
 /* ERROR TYPES ----------------------------------------- */
 pub mod error {
-    pub type ResErr = Result<(), ErrType>;
-    pub type ResType<T> = Result<T, ErrType>;
+    use crate::log;
+    use std::{
+        ffi::OsString,
+        fmt::{self, Debug},
+        path::{Path, PathBuf},
+    };
+    pub type ResErr = Result<(), ErKind>;
+    pub type ResType<T> = Result<T, ErKind>;
 
     #[derive(Debug, PartialEq)]
-    pub enum ErrType {
-        UserAbort,
-        Generic(String),
-        FileRWFailed(String),
+    #[non_exhaustive]
+    pub enum ErKind {
+        UserAbort(Option<&'static str>),
+        Generic(&'static str),
+        NotFoundConfig,
+        SourceEmpty,
+        /// After validation, no request package from user is valid.
+        /// @ret: `src_dir` to list all packages available in src.
+        NoValidPackage(Option<PathBuf>),
+        /// Current system have no package that are in sync.
+        /// @ret: `src_dir` to list all packages available in src.
+        SysEmpty(Option<PathBuf>),
+        IOFailRead(PathBuf, String),
+        IOFailWrite(PathBuf, String),
+        /// File/Dir already exists, and not symlink.
+        IOExisted(PathBuf),
         BadConfigFile(String),
-        ExternProgram(String),
+        /// Call external program but failed to execute.
+        /// @ret: `program name`, `exit code`, `error message`.
+        ExternProgram(String, i32, String),
+        NotFoundPackage(String),
+        /// Cannot find requested file(s) in the package.
+        /// @ret: `package name` and `pattern` try to matches.
+        NotFoundFile(OsString, String),
+        PackageNotEmpty,
     }
 
-    impl std::fmt::Display for ErrType {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            let msg = match self {
-                Self::UserAbort => "peacefully exit...",
-                Self::Generic(s) => s,
-                Self::ExternProgram(s) => s,
-                Self::FileRWFailed(s) => s,
-                Self::BadConfigFile(s) => s,
-            };
-            std::fmt::write(f, format_args!("{msg}"))
+    impl std::error::Error for ErKind {}
+
+    impl fmt::Display for ErKind {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            #[allow(unused_imports)]
+            use ErKind::*;
+            use console::style;
+            match self {
+                SourceEmpty => write!(f, "no package in <source>"),
+                NotFoundConfig => write!(f, "not found configurations file!!"),
+                NoValidPackage(_) => write!(f, "nothing to run!"),
+                SysEmpty(_) => write!(f, "no package currently in sync on this system!"),
+                PackageNotEmpty => write!(f, "there are files remain in package!!"),
+                BadConfigFile(msg) => write!(f, "invalid config: {msg}"),
+                Generic(msg) => write!(f, "{msg}"),
+                UserAbort(msg) => {
+                    write!(f, "{}", msg.unwrap_or("user abort, peacefully exit!!"))
+                }
+                IOFailRead(file, msg) => {
+                    let p = style(Self::trim_path(file)).blue();
+                    write!(f, "read from '{p}': {msg}")
+                }
+                IOFailWrite(file, msg) => {
+                    let p = style(Self::trim_path(file)).blue();
+                    write!(f, "write to '{p}': {msg}")
+                }
+                IOExisted(file) => {
+                    let p = style(Self::trim_path(file)).blue();
+                    write!(f, "already exists: '{p}' and it not a symlink!")
+                }
+
+                NotFoundFile(pkg, file) => {
+                    let fi = style(file).cyan();
+                    let pk = style(pkg.display()).blue();
+                    write!(f, "not found file '{fi}' in package: {pk}")
+                }
+                ExternProgram(name, code, msg) => {
+                    let n = style(name).blue();
+                    write!(f, "external '{n}' exit /w code: {code} error: {msg}")
+                }
+                NotFoundPackage(pkg) => {
+                    let name = console::style(pkg).blue();
+                    write!(f, "request package '{name}' not in <source>")
+                } // _ => write!(f, "not implemented yet"),
+            }
         }
     }
 
-    impl ErrType {
-        pub fn print_err(&self) {
-            if self == &ErrType::UserAbort {
-                super::log::info(self)
+    impl ErKind {
+        pub fn print(&self, exit: Option<i32>) {
+            if matches!(self, Self::UserAbort(_)) {
+                log::info(self);
             } else {
-                super::log::error(self);
+                log::error(self);
+            }
+
+            if let Some(code) = exit {
+                std::process::exit(code);
             }
         }
 
-        /// Mark error as `Fatal`, print error and exit program
-        pub fn fatal_err(&self) -> ! {
-            super::log::fatal(self)
+        fn trim_path(path: &Path) -> String {
+            // TODO: this is a mess
+            if path.components().count() < 3 {
+                path.display().to_string()
+            } else {
+                let n0 = path.file_name().unwrap();
+                let p1 = path.parent().unwrap();
+                let n1 = p1.file_name().unwrap();
+                let n2 = p1.parent().unwrap().file_name().unwrap();
+
+                format!("../{}/{}/{}", n2.display(), n1.display(), n0.display())
+            }
         }
     }
 }
@@ -50,48 +123,53 @@ pub mod log {
     use core::fmt::Display;
     use dialoguer::{Confirm, theme::ColorfulTheme};
 
-    use crate::error::{ErrType, ResType};
+    use crate::error::{ErKind, ResType};
 
-    macro_rules! printout {
+    macro_rules! pstd {
         ($msg:expr, $ctx:expr) => {
             println!("[{}] -- {}", $ctx, $msg)
+        };
+    }
+    macro_rules! pstderr {
+        ($msg:expr, $ctx:expr) => {
+            eprintln!("[{}] -- {}", $ctx, $msg)
         };
     }
 
     #[inline]
     pub fn fatal<S: Display>(msg: S) -> ! {
-        printout!(msg, style("fatal").yellow().on_red());
+        pstderr!(msg, style("fatal").yellow().on_red());
         std::process::exit(-1)
     }
 
     #[inline]
     pub fn error<S: Display>(msg: S) {
-        printout!(msg, style("error").red());
+        pstderr!(msg, style("error").red());
     }
 
     #[inline]
     pub fn warn<S: Display>(msg: S) {
-        printout!(msg, style("warn").yellow());
+        pstd!(msg, style("warn").yellow());
     }
 
     #[inline]
     pub fn skip<S: Display>(msg: S) {
-        printout!(msg, style("skipped").yellow());
+        pstd!(msg, style("skipped").yellow());
     }
 
     #[inline]
     pub fn sucess<S: Display>(msg: S) {
-        printout!(msg, style(" ok ").green());
+        pstd!(msg, style(" ok ").green());
     }
 
     #[inline]
     pub fn info<S: Display>(msg: S) {
-        printout!(msg, style("info").cyan());
+        pstd!(msg, style("info").cyan());
     }
 
     #[inline]
     pub fn msg<S: Display>(msg: S) {
-        printout!(msg, " .. ");
+        pstd!(msg, " .. ");
     }
 
     /// Ask user to confirmation before continue.
@@ -103,56 +181,77 @@ pub mod log {
         default_yes: bool,
         false_continue: bool,
     ) -> ResType<bool> {
-        let user = Confirm::with_theme(&ColorfulTheme::default())
+        let choice = Confirm::with_theme(&ColorfulTheme::default())
             .with_prompt(msg)
             .default(default_yes)
             .interact()
             .unwrap_or(false);
 
-        if user || false_continue {
-            Ok(user)
+        if choice || false_continue {
+            Ok(choice)
         } else {
-            Err(ErrType::UserAbort)
+            Err(ErKind::UserAbort(None))
         }
     }
 }
 
 pub mod fileio {
-    use super::error::{ErrType, ResErr};
+    use crate::log;
+
+    use super::error::{ErKind, ResErr};
     use std::{fs, io, path::Path, process::Command};
 
-    pub fn run_program<I, S>(cmd: &str, args: I) -> Result<(), ErrType>
+    pub fn run_program<I, S>(cmd: &str, args: I) -> ResErr
     where
         I: IntoIterator<Item = S>,
         S: AsRef<std::ffi::OsStr>,
     {
-        match Command::new(cmd).args(args).status() {
-            Err(e) => Err(ErrType::ExternProgram(format!("cannot run '{cmd}': {e}"))),
-            Ok(_) => Ok(()),
+        let a = Command::new(cmd).args(args).output();
+
+        // TODO: check this.
+        match a {
+            Ok(output) => {
+                let a = output.status;
+
+                if a.success() {
+                    Ok(())
+                } else {
+                    let msg = output.stderr.into_iter().map(|c| c.to_string()).collect();
+
+                    Err(ErKind::ExternProgram(
+                        cmd.to_string(),
+                        a.code().unwrap_or(0xAF),
+                        msg,
+                    ))
+                }
+            }
+            Err(e) => Err(ErKind::ExternProgram(cmd.to_string(), 0xAF, e.to_string())),
         }
+
+        // match Command::new(cmd).args(args).status() {
+        //     Err(e) => Err(ErKind::ExternProgram(cmd.to_string(), -1, e.to_string())),
+        //     Ok(_) => Ok(()),
+        // }
     }
 
     /// Try to create a directory, skip if already exist
     /// Otherwise return Err if failed
+    #[inline]
     pub fn try_make_dir(dest: &Path, verbose: bool) -> ResErr {
-        if let Err(e) = std::fs::create_dir_all(dest) {
-            if e.kind() != io::ErrorKind::AlreadyExists {
-                return Err(ErrType::FileRWFailed(format!(
-                    "cannot make dir '{}': {}",
-                    dest.display(),
-                    e
-                )));
-            }
+        use std::io::ErrorKind::AlreadyExists;
 
-            if verbose {
-                super::log::skip(format!(
-                    "make path '{}' already exists",
-                    dest.to_str().unwrap()
-                ));
+        std::fs::create_dir_all(dest).or_else(|err| {
+            if matches!(err.kind(), AlreadyExists) {
+                if verbose {
+                    let m = format!("already exists: {}", dest.display());
+                    log::skip(m);
+                }
+                Ok(())
+            } else {
+                let m = format!("failed makedir: {err}");
+                Err(ErKind::IOFailWrite(dest.to_path_buf(), m))
             }
-        }
-
-        Ok(())
+        })
     }
 
     /// Get all the files in `dir` with that type `ext` and move into `dest`
@@ -174,28 +273,41 @@ pub mod fileio {
         }
     }
 
+    /// Make a symlink `d_dest/f_name`, point to `d_src/f_name`.
+    #[cfg(false)]
     pub fn symlink_to_dir(d_src: &Path, d_dest: &Path, f_name: &str) -> ResErr {
+        use std::io::ErrorKind;
         let f_src = d_src.join(f_name);
         let f_dst = d_dest.join(f_name);
 
-        if let Ok(f) = f_dst.read_link() {
-            if f == f_dst {
-                return Ok(());
+        match f_dst.read_link() {
+            Err(e) if matches!(e.kind(), ErrorKind::InvalidInput) => {
+                // f_dst is a file.
+                return Err(ErKind::IOExisted(f_dst));
             }
-
-            if let Err(e) = std::fs::remove_file(&f_dst) {
-                return Err(ErrType::FileRWFailed(format!(
-                    "cannot remove old symlink ->'{f_name}': {e}"
-                )));
+            Err(e) if matches!(e.kind(), ErrorKind::NotFound) => {}
+            Err(e) => {
+                return Err(ErKind::IOFailRead(f_dst, e.to_string()));
+            }
+            Ok(_) => {
+                if let Err(e) = std::fs::remove_file(&f_dst) {
+                    let m = format!("remove symlink ->'{f_name}': {e}");
+                    return Err(ErKind::IOFailWrite(f_dst.clone(), m));
+                }
             }
         }
 
-        match symlink_rs::symlink_file(f_src, f_dst) {
-            Err(e) => Err(ErrType::FileRWFailed(format!(
-                "cannot make symlink ->'{f_name}': {e}"
-            ))),
-            Ok(_) => Ok(()),
-        }
+        // match symlink_rs::symlink_file(f_src, f_dst) {
+        //     Err(e) => Err(ErrType::FileRWFailed(format!(
+        //         "cannot make symlink ->'{f_name}': {e}"
+        //     ))),
+        //     Ok(_) => Ok(()),
+        // }
+
+        symlink_rs::symlink_file(&f_src, &f_dst).map_err(|e| {
+            let m = format!("make symlink ->'{f_name}: {e}");
+            ErKind::IOFailWrite(f_dst, m)
+        })
     }
 
     /// Read symlink and check if the file symlink point to is the
@@ -226,27 +338,23 @@ pub mod fileio {
     /// Also remove provided dir if is empty after cleanup.
     pub fn rm_empty_dirs(path: &Path) -> ResErr {
         // TODO: handle symlink to a dir
-        let is_symlink = match fs::symlink_metadata(path) {
-            Err(e) => return Err(ErrType::FileRWFailed(e.to_string())),
-            Ok(t) => t.file_type().is_symlink(),
-        };
-
-        if !is_symlink {
+        if !path.is_symlink() {
             #[cfg(not(windows))]
-            {
-                if let Err(e) = rm_empty_dir_unix(path) {
-                    return Err(ErrType::FileRWFailed(e.to_string()));
-                }
-            }
+            let ret = rm_empty_dir_unix(path);
 
             #[cfg(windows)]
-            {
-                if let Err(e) = rm_empty_dir_wind(path) {
-                    return Err(ErrType::FileRWFailed(e.to_string()));
+            let ret = rm_empty_dir_wind(path);
+
+            ret.map_err(|err| {
+                if matches!(err.kind(), io::ErrorKind::DirectoryNotEmpty) {
+                    ErKind::PackageNotEmpty
+                } else {
+                    ErKind::IOFailWrite(path.to_path_buf(), err.to_string())
                 }
-            }
+            })
+        } else {
+            Err(ErKind::PackageNotEmpty)
         }
-        Ok(())
     }
 
     // ---------------------------------------------------------- //
@@ -259,18 +367,10 @@ pub mod fileio {
             .filter(|p| p.is_dir());
 
         for dir_path in subdirs {
-            // dbg!(dir_path.display());
             rm_empty_dir_unix(&dir_path)?;
         }
 
-        // dbg!("run remove dir");
-        if let Err(err) = fs::remove_dir(path)
-            && err.kind() != io::ErrorKind::DirectoryNotEmpty
-        {
-            return Err(err);
-        }
-
-        Ok(())
+        fs::remove_dir(path)
     }
 
     #[cfg(windows)]
