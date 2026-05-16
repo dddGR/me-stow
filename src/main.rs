@@ -5,7 +5,7 @@ use me_stow::cmd_stow;
 use me_stow::cmd_sync;
 use me_stow::error::ErKind;
 
-// TODO:
+// TODO: list
 // - f_sys is a link to a file that in the same dir(package).
 // - file need to be stow that already in other stow pkg.
 // - EXCLUDE matches pattern.

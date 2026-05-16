@@ -7,7 +7,7 @@ use crate::ResErr;
 use crate::config;
 use crate::error::ErKind;
 use crate::fileio;
-use crate::log;
+use crate::messages as ms;
 use crate::util;
 
 pub fn run(
@@ -18,92 +18,94 @@ pub fn run(
     is_remove_all: bool,
 ) -> AppResult {
     let mut src_pks = util::get_all_packages(&cfg.path_source)?;
-    let rm_results = if let Some(pk_name) = usr_req_pk {
-        let (pk_name, pk_path) = util::get_pkg_by_name(&mut src_pks, &pk_name)
-            .ok_or(ErKind::NotFoundPackage(pk_name))?
-            .swap_remove(0);
+    let rm_results = match usr_req_pk {
+        None => {
+            // Package is alway provide before file(s)
+            // if NOT Package, files is also None (no need to check)
+            if !is_remove_all {
+                return Err(ErKind::Generic(
+                    "nothing to remove\nuse '--all' if you want to remove all packages",
+                ));
+            } // TODO: maybe add str field
+            // TODO: maybe list all the current pkgs for user to confirm.
 
-        // This will store all the files that can (and will) be remove
-        // And this only store the stowed file (not path to symlink on sys)
-        // The path to symlink will be concatinate later when doing remove.
-        let mut rm_files: Vec<PathBuf> = Vec::new();
-        match usr_req_files {
-            Some(f) => {
-                // When user provide file(s) to remove.
-                // TODO: use collect to improve this.
-                for p_file in f {
-                    // EVERYTHING NOT SUCCESS WILL FALL TO THE BOTTOM.
-                    if let Ok(f_stowed) = p_file.canonicalize()
-                        && f_stowed.strip_prefix(&pk_path).is_ok()
-                    {
-                        // User provide path that that in stow package or
-                        // point to the file to the file on stow package (stowed file)
-                        // pkg-path will be stripable.
-                        rm_files.push(f_stowed);
-                        continue;
-                    } else {
-                        // TRY: to match any file that in provide package
-                        // When all above failed, assume that user provide only
-                        // file(s) name (or relative path),
-                        // try to search in package for that file.
-                        let glob_finds = p_file.to_str().and_then(|p| {
-                            let pattern = p.trim_start_matches('/');
-                            util::get_files_in_path(&pk_path, Some(pattern)).ok()
-                        });
+            src_pks
+                .into_iter()
+                .map(|(name, path)| {
+                    let a = util::get_files_in_path(&path, None)
+                        .and_then(|files| rm_package(&cfg.path_root, &name, &path, files, purge))
+                        .and_then(|_| fileio::rm_empty_dirs(&path));
 
-                        if let Some(files) = glob_finds {
-                            rm_files.extend(files);
-                            continue;
-                        }
-                    }
+                    (name, a)
+                })
+                .collect()
+        }
+        Some(pk_name) => {
+            let (pk_name, pk_path) = util::get_pkg_by_name(&mut src_pks, &pk_name)
+                .ok_or(ErKind::NotFoundPackage(pk_name))?
+                .swap_remove(0);
 
-                    log::skip(format!("not valid file: '{}'", p_file.display()));
+            // This will store all the files that can (and will) be remove
+            // And this only store the stowed file (not path to symlink on sys)
+            // The path to symlink will be concatinate later when doing remove.
+            let mut rm_files: Vec<PathBuf> = Vec::new();
+            match usr_req_files {
+                None => {
+                    // User not provide file to remove
+                    // Remove all files in package
+                    rm_files = util::get_files_in_path(&pk_path, None)?;
                 }
+                Some(files) => {
+                    // When user provide file(s) to remove.
+                    // TODO: use collect to improve this.
+                    for path in files {
+                        // EVERYTHING NOT SUCCESS WILL FALL TO THE BOTTOM.
+                        if let Ok(f_stowed) = path.canonicalize()
+                            && f_stowed.strip_prefix(&pk_path).is_ok()
+                        {
+                            // User provide path that that in stow package or
+                            // point to the file to the file on stow package (stowed file)
+                            // pkg-path will be stripable.
+                            rm_files.push(f_stowed);
+                            continue;
+                        } else {
+                            // TRY: to match any file that in provide package
+                            // When all above failed, assume that user provide only
+                            // file(s) name (or relative path),
+                            // try to search in package for that file.
+                            let glob_finds = path.to_str().and_then(|p| {
+                                let pattern = p.trim_start_matches('/');
+                                util::get_files_in_path(&pk_path, Some(pattern)).ok()
+                            });
+
+                            if let Some(files) = glob_finds {
+                                rm_files.extend(files);
+                                continue;
+                            }
+                        }
+
+                        ms::skip!("not valid file: '{}'", path.display());
+                    }
+                }
+            };
+
+            // Print result here and wait for user comfirmation
+            if rm_files.is_empty() {
+                return Err(ErKind::NoValidPackage(None));
             }
-            None => {
-                // User not provide file to remove
-                // Remove all files in package
-                rm_files = util::get_files_in_path(&pk_path, None)?;
+            println!("\nRemovable files:");
+            for file in &rm_files {
+                let p = file.strip_prefix(&pk_path).unwrap().display();
+                ms::success!("'../{}'", p);
             }
-        };
-        // Print result here and wait for user comfirmation
-        if rm_files.is_empty() {
-            return Err(ErKind::NoValidPackage(None));
+            ms::ask_confirm("Remove all files:", false, false)?;
+            rm_package(&cfg.path_root, &pk_name, &pk_path, rm_files, purge)?;
+
+            // try to remove the package, if every files has been deleted
+            // the package dir will be remove, othewise, ignore
+            let rs = fileio::rm_empty_dirs(&pk_path);
+            vec![(pk_name, rs)]
         }
-        println!("\nRemovable files:");
-        for file in &rm_files {
-            let p = file.strip_prefix(&pk_path).unwrap().display();
-            log::sucess(format!("'../{p}'"));
-        }
-        log::ask_confirm("Remove all files:", false, false)?;
-        rm_package(&cfg.path_root, &pk_name, &pk_path, rm_files, purge)?;
-
-        // try to remove the package, if every files has been deleted
-        // the package dir will be remove, othewise, ignore
-        let rs = fileio::rm_empty_dirs(&pk_path);
-        vec![(pk_name, rs)]
-    } else {
-        // Package is alway provide before file(s)
-        // if NOT Package, files is also None (no need to check)
-        if !is_remove_all {
-            return Err(ErKind::Generic(
-                "nothing to remove\nuse '--all' if you want to remove all packages",
-            ));
-        } // TODO: maybe add str field
-        // TODO: maybe list all the current pkgs for user to confirm.
-
-        src_pks
-            .into_iter()
-            .map(|(name, path)| {
-                let a = util::get_files_in_path(&path, None)
-                    .and_then(|files| rm_package(&cfg.path_root, &name, &path, files, purge))
-                    .and_then(|_| fileio::rm_empty_dirs(&path));
-
-                // let a = fileio::rm_empty_dirs(path);
-
-                (name, a)
-            })
-            .collect()
     };
 
     // TODO: do this can really happen??
@@ -114,9 +116,7 @@ pub fn run(
     for (pkg, rm_result) in rm_results.into_iter() {
         match rm_result {
             Err(ErKind::PackageNotEmpty) => {}
-            Err(err) => {
-                log::error(err);
-            }
+            Err(err) => ms::error!(err),
             Ok(_) => {
                 if let Ok(a) = cfg.packages.binary_search(&pkg) {
                     cfg.packages.swap_remove(a);
@@ -136,14 +136,12 @@ fn rm_package(
     purge: bool,
 ) -> ResErr {
     println!();
-    #[rustfmt::skip]
-    log::info(format!("run remove on: '{}'", console::style(pk_name).blue()));
-
+    ms::info!("run remove on: '{}'", ms::blue!(pk_name));
     for f_stowed in rm_files {
         // get equivalent file on the system
         let path_rel = f_stowed
             .strip_prefix(pk_path)
-            .expect("path is already evalutated, this never fail");
+            .expect("path is already evalutated, this should not fail");
         let f_sys = path_root.join(path_rel);
 
         // WHEN: `purge`, simply remove everything.

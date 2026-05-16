@@ -11,7 +11,7 @@ use dialoguer::Input;
 use dialoguer::theme::ColorfulTheme;
 
 use crate::error::ErKind;
-use crate::log;
+use crate::messages as ms;
 
 /* ----------------------------------------------------- */
 /* CONSTANTS ------------------------------------------- */
@@ -80,15 +80,15 @@ impl Config {
             Ok(config) => Ok(config),
             Err(err) if matches!(err, ErKind::NotFoundConfig) => {
                 // log::warn("not found configurations file!!");
-                log::warn(err);
-                if !log::ask_confirm("Create new config file:", true, true).expect("checked") {
+                ms::warn!(err);
+                if !ms::ask_confirm("Create new config file:", true, true).expect("checked") {
                     return Err(ErKind::UserAbort(Some(
                         "Create config file and run again.\nExit...!!",
                     )));
                 }
 
                 let config = Self::default();
-                if log::ask_confirm("Save new config file:", true, true).expect("checked") {
+                if ms::ask_confirm("Save new config file:", true, true).expect("checked") {
                     config.save_to_file(&f_config_default);
                 }
 
@@ -105,15 +105,6 @@ impl Config {
     }
 
     fn new_from_file(path: &Path) -> Result<Self, ErKind> {
-        // let mut f_toml = File::open(path).map_err(|err| {
-        //     ErrType::BadConfigFile(format!("cannot open '{}': {}", path.display(), err))
-        // })?;
-
-        // let mut content = String::with_capacity(1024); // Approximate
-        // let _ = f_toml.read_to_string(&mut content).map_err(|err| {
-        //     ErrType::BadConfigFile(format!("cannot read '{}': {}", path.display(), err))
-        // })?;
-
         let f_toml = File::open(path).map_err(|e| {
             if e.kind() == io::ErrorKind::NotFound {
                 ErKind::NotFoundConfig
@@ -125,14 +116,14 @@ impl Config {
         let content = io::read_to_string(f_toml)
             .map_err(|e| ErKind::IOFailRead(path.to_path_buf(), e.to_string()))?;
 
-        toml::from_str::<Config>(&content).map_err(|e| ErKind::BadConfigFile(e.to_string()))
+        toml::from_str::<Self>(&content).map_err(|e| ErKind::BadConfigFile(e.to_string()))
     }
 
     fn save_to_file(&self, path: &Path) {
-        let str_config = toml::ser::to_string(self).unwrap();
+        let cfg_str = toml::ser::to_string(self).unwrap();
 
         let mut f_toml = File::create(path).unwrap();
-        f_toml.write_all(str_config.as_bytes()).unwrap();
+        f_toml.write_all(cfg_str.as_bytes()).unwrap();
     }
 
     pub fn save(&self) {

@@ -4,6 +4,7 @@ pub mod cmd_remove;
 pub mod cmd_stow;
 pub mod cmd_sync;
 pub mod config;
+pub mod messages;
 
 pub type ResErr = Result<(), error::ErKind>;
 pub type ResType<T> = Result<T, error::ErKind>;
@@ -12,7 +13,7 @@ pub type AppResult = ResType<Option<config::Config>>;
 /* ----------------------------------------------------- */
 /* ERROR TYPES ----------------------------------------- */
 pub mod error {
-    use crate::log;
+    use crate::messages as ms;
     use std::{
         ffi::OsString,
         fmt::{self, Debug},
@@ -90,7 +91,7 @@ pub mod error {
                 NotFoundPackage(pkg) => {
                     let name = console::style(pkg).blue();
                     write!(f, "request package '{name}' not in <source>")
-                } // _ => write!(f, "not implemented yet"),
+                }
             }
         }
     }
@@ -98,9 +99,9 @@ pub mod error {
     impl ErKind {
         pub fn print(&self, exit: Option<i32>) {
             if matches!(self, Self::UserAbort(_)) {
-                log::info(self);
+                ms::info!(self);
             } else {
-                log::error(self);
+                ms::error!(self);
             }
 
             if let Some(code) = exit {
@@ -126,97 +127,24 @@ pub mod error {
 
 /* ----------------------------------------------------- */
 /* UTILS ----------------------------------------------- */
-#[allow(dead_code)]
-pub mod log {
-    use console::style;
-    use core::fmt::Display;
-    use dialoguer::{Confirm, theme::ColorfulTheme};
-
-    use crate::ResType;
-    use crate::error::ErKind;
-
-    macro_rules! pstd {
-        ($msg:expr, $ctx:expr) => {
-            println!("[{}] -- {}", $ctx, $msg)
-        };
-    }
-    macro_rules! pstderr {
-        ($msg:expr, $ctx:expr) => {
-            eprintln!("[{}] -- {}", $ctx, $msg)
-        };
-    }
-
-    #[inline]
-    pub fn fatal<S: Display>(msg: S) -> ! {
-        pstderr!(msg, style("fatal").yellow().on_red());
-        std::process::exit(-1)
-    }
-
-    #[inline]
-    pub fn error<S: Display>(msg: S) {
-        pstderr!(msg, style("error").red());
-    }
-
-    #[inline]
-    pub fn warn<S: Display>(msg: S) {
-        pstd!(msg, style("warn").yellow());
-    }
-
-    #[inline]
-    pub fn skip<S: Display>(msg: S) {
-        pstd!(msg, style("skipped").yellow());
-    }
-
-    #[inline]
-    pub fn sucess<S: Display>(msg: S) {
-        pstd!(msg, style(" ok ").green());
-    }
-
-    #[inline]
-    pub fn info<S: Display>(msg: S) {
-        pstd!(msg, style("info").cyan());
-    }
-
-    #[inline]
-    pub fn msg<S: Display>(msg: S) {
-        pstd!(msg, " .. ");
-    }
-
-    /// Ask user to confirmation before continue.
-    /// With msg promt and default answ.
-    /// When not `false_continue`, this will output `Err()`
-    /// that can be use with `?` to exit function
-    pub fn ask_confirm<S: Into<String>>(
-        msg: S,
-        default_yes: bool,
-        false_continue: bool,
-    ) -> ResType<bool> {
-        let choice = Confirm::with_theme(&ColorfulTheme::default())
-            .with_prompt(msg)
-            .default(default_yes)
-            .interact()
-            .unwrap_or(false);
-
-        if choice || false_continue {
-            Ok(choice)
-        } else {
-            Err(ErKind::UserAbort(None))
-        }
-    }
-}
 
 pub mod fileio {
     use crate::ResErr;
     use crate::error::ErKind;
-    use crate::log;
+    use crate::messages as ms;
 
-    use std::{fs, io, path::Path, process::Command};
+    use std::fs;
+    use std::io;
+    use std::path::Path;
 
+    #[cfg(false)]
     pub fn run_program<I, S>(cmd: &str, args: I) -> ResErr
     where
         I: IntoIterator<Item = S>,
         S: AsRef<std::ffi::OsStr>,
     {
+        use std::process::Command;
+
         let a = Command::new(cmd).args(args).output();
 
         // TODO: check this.
@@ -254,8 +182,7 @@ pub mod fileio {
         std::fs::create_dir_all(dest).or_else(|err| {
             if matches!(err.kind(), AlreadyExists) {
                 if verbose {
-                    let m = format!("already exists: {}", dest.display());
-                    log::skip(m);
+                    ms::skip!("already exists: {}", dest.display());
                 }
                 Ok(())
             } else {
@@ -279,7 +206,7 @@ pub mod fileio {
                 .is_eq()
                 && let Err(e) = std::fs::rename(&f_dir, dest.join(entry.file_name()))
             {
-                super::log::error(format!("move '{}' with: {}", f_dir.to_string_lossy(), e));
+                ms::error!("move '{}' with: {}", f_dir.display(), e);
             }
         }
     }
@@ -399,7 +326,7 @@ pub mod util {
 
     use crate::ResType;
     use crate::error::ErKind;
-    use crate::log;
+    use crate::messages as ms;
 
     /// Get all the packages that current in source dir
     pub fn get_all_packages(src_dir: &Path) -> ResType<FxHashMap<String, PathBuf>> {
@@ -436,23 +363,23 @@ pub mod util {
     /// Also print out info.
     pub fn get_pkg_by_name(
         src_pks: &mut FxHashMap<String, PathBuf>,
-        name: impl AsRef<str>,
+        name: &str,
     ) -> Option<Vec<(String, PathBuf)>> {
         let pks: Vec<(String, PathBuf)> = src_pks
-            .extract_if(|k, _| wildmatch::WildMatch::new(name.as_ref()).matches(k))
+            .extract_if(|k, _| wildmatch::WildMatch::new(name).matches(k))
             .collect();
 
         let num = pks.len();
         if num == 0 {
-            log::error(format!(
-                "not found in <source>, package: '{}'",
-                console::style(name.as_ref()).blue()
-            ));
+            ms::error!("not found in <source>, package: '{}'", ms::blue!(name));
             return None;
         } else if num > 1 {
-            let name = console::style(name.as_ref()).blue();
             // TODO: maybe print out expansion name.
-            log::info(format!("expand to [{num:02}] packages /w key: '{}'", name));
+            ms::info!(
+                "key '{}' expanded to [{:02}] packages",
+                ms::blue!(name),
+                num
+            );
         }
         Some(pks)
     }
@@ -467,13 +394,13 @@ pub mod util {
             .filter(|p| p.is_file())
             .collect();
 
-        if !globs.is_empty() {
-            Ok(globs)
-        } else if !matches!(req_name, "*") {
-            let pk_name = path.file_name().unwrap().to_os_string();
-            Err(ErKind::NotFoundFile(pk_name, req_name.to_string()))
-        } else {
-            Err(ErKind::Generic("package empty!!!"))
+        match globs.is_empty() {
+            false => Ok(globs),
+            true if !matches!(req_name, "*") => {
+                let pk_name = path.file_name().unwrap().to_os_string();
+                Err(ErKind::NotFoundFile(pk_name, req_name.to_string()))
+            }
+            true => Err(ErKind::Generic("package empty!!!")),
         }
     }
 }

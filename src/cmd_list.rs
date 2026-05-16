@@ -6,7 +6,7 @@ use rustc_hash::FxHashMap;
 
 use crate::AppResult;
 use crate::error::ErKind;
-use crate::log;
+use crate::messages as ms;
 use crate::util;
 
 pub fn run(src_path: &Path, req_pk: Option<String>, full_list: bool) -> AppResult {
@@ -27,14 +27,13 @@ pub fn run(src_path: &Path, req_pk: Option<String>, full_list: bool) -> AppResul
         // And only print package NAME if not need `full_list`
         print_all_packages(curr_pks, full_list);
     }
-
     Ok(None)
 }
 
 pub fn print_all_packages(packages: FxHashMap<String, PathBuf>, full_list: bool) {
     println!(
         "Available Packages in <source>: [{:02}]",
-        console::style(packages.len()).green()
+        ms::green!(packages.len())
     );
 
     if full_list {
@@ -42,21 +41,17 @@ pub fn print_all_packages(packages: FxHashMap<String, PathBuf>, full_list: bool)
         for (name, pk_path) in packages.iter() {
             match tree(pk_path) {
                 Ok(tree) => println!("{tree}"),
-                Err(e) => log::error(format!(
-                    "cannot display package: '{}': {e}",
-                    console::style(name).blue()
-                )),
+                Err(err) => ms::error!("cannot display package: '{}': {}", ms::blue!(name), err),
             }
         }
     } else {
-        // Name of packages only: print 5 items in one row
+        // Name of packages only: print 4 items in one row
         let total = packages.len();
         for (i, p) in packages.keys().sorted().enumerate() {
-            let name = console::style(p).blue();
-            if (i + 1) % 5 == 0 || i == total - 1 {
-                println!("> {}", name)
+            if (i + 1) % 4 == 0 || i == total - 1 {
+                println!("> {}", ms::blue!(p))
             } else {
-                print!("> {:17}", name)
+                print!("> {:32}", ms::blue!(p))
             }
         }
     }
