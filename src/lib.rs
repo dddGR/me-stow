@@ -104,6 +104,7 @@ pub mod error {
                 ms::error!(self);
             }
 
+            // for exit early
             if let Some(code) = exit {
                 std::process::exit(code);
             }

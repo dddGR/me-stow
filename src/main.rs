@@ -1,3 +1,5 @@
+use std::process::ExitCode;
+
 use me_stow::AppResult;
 use me_stow::cmd_list;
 use me_stow::cmd_remove;
@@ -11,7 +13,7 @@ use me_stow::error::ErKind;
 // - EXCLUDE matches pattern.
 // - SYNC, but file on sys is broken symlink
 
-fn main() {
+fn main() -> ExitCode {
     match run_main() {
         Err(err) => {
             err.print(None);
@@ -21,14 +23,17 @@ fn main() {
                 }
                 _ => {}
             }
+            return ExitCode::FAILURE;
         }
-        Ok(some) => {
-            if let Some(config) = some {
-                // log::info("save config file");
-                config.save();
+        Ok(Some(config)) => {
+            if let Err(err) = config.save() {
+                err.print(None);
+                return ExitCode::FAILURE;
             }
         }
+        Ok(None) => {}
     }
+    ExitCode::SUCCESS
 }
 
 fn run_main() -> AppResult {

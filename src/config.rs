@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use dialoguer::Input;
 use dialoguer::theme::ColorfulTheme;
 
+use crate::ResErr;
 use crate::error::ErKind;
 use crate::messages as ms;
 
@@ -89,7 +90,7 @@ impl Config {
 
                 let config = Self::default();
                 if ms::ask_confirm("Save new config file:", true, true).expect("checked") {
-                    config.save_to_file(&f_config_default);
+                    config.save_to_file(&f_config_default)?;
                 }
 
                 Ok(config)
@@ -119,15 +120,18 @@ impl Config {
         toml::from_str::<Self>(&content).map_err(|e| ErKind::BadConfigFile(e.to_string()))
     }
 
-    fn save_to_file(&self, path: &Path) {
+    fn save_to_file(&self, path: &Path) -> ResErr {
         let cfg_str = toml::ser::to_string(self).unwrap();
 
-        let mut f_toml = File::create(path).unwrap();
-        f_toml.write_all(cfg_str.as_bytes()).unwrap();
+        File::create(path)
+            .and_then(|mut fd| fd.write_all(cfg_str.as_bytes()))
+            .map_err(|err| ErKind::IOFailWrite(path.to_path_buf(), err.to_string()))?;
+
+        Ok(())
     }
 
-    pub fn save(&self) {
+    pub fn save(&self) -> ResErr {
         let config_path = Config::get_path_default();
-        self.save_to_file(&config_path);
+        self.save_to_file(&config_path)
     }
 }
