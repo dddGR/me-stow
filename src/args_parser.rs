@@ -1,8 +1,10 @@
 /* ----------------------------------------------------- */
 /* ARGS PARSER ----------------------------------------- */
 
-use clap::{ArgAction, Parser, Subcommand};
 use std::path::PathBuf;
+
+use clap::ArgAction;
+use clap::Parser;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -18,7 +20,7 @@ impl Cli {
     }
 }
 
-#[derive(Subcommand)]
+#[derive(clap::Subcommand)]
 pub enum Command {
     /// Show packages status, alias for `sync -d`
     Status {

@@ -1,3 +1,14 @@
+pub mod args_parser;
+pub mod cmd_list;
+pub mod cmd_remove;
+pub mod cmd_stow;
+pub mod cmd_sync;
+pub mod config;
+
+pub type ResErr = Result<(), error::ErKind>;
+pub type ResType<T> = Result<T, error::ErKind>;
+pub type AppResult = ResType<Option<config::Config>>;
+
 /* ----------------------------------------------------- */
 /* ERROR TYPES ----------------------------------------- */
 pub mod error {
@@ -7,8 +18,6 @@ pub mod error {
         fmt::{self, Debug},
         path::{Path, PathBuf},
     };
-    pub type ResErr = Result<(), ErKind>;
-    pub type ResType<T> = Result<T, ErKind>;
 
     #[derive(Debug, PartialEq)]
     #[non_exhaustive]
@@ -123,7 +132,8 @@ pub mod log {
     use core::fmt::Display;
     use dialoguer::{Confirm, theme::ColorfulTheme};
 
-    use crate::error::{ErKind, ResType};
+    use crate::ResType;
+    use crate::error::ErKind;
 
     macro_rules! pstd {
         ($msg:expr, $ctx:expr) => {
@@ -196,9 +206,10 @@ pub mod log {
 }
 
 pub mod fileio {
+    use crate::ResErr;
+    use crate::error::ErKind;
     use crate::log;
 
-    use super::error::{ErKind, ResErr};
     use std::{fs, io, path::Path, process::Command};
 
     pub fn run_program<I, S>(cmd: &str, args: I) -> ResErr
@@ -376,5 +387,93 @@ pub mod fileio {
     #[cfg(windows)]
     fn rm_empty_dir_wind(_path: &Path) {
         unimplemented!()
+    }
+}
+
+pub mod util {
+    use std::os::unix::ffi::OsStrExt as _;
+    use std::path::Path;
+    use std::path::PathBuf;
+
+    use rustc_hash::FxHashMap;
+
+    use crate::ResType;
+    use crate::error::ErKind;
+    use crate::log;
+
+    /// Get all the packages that current in source dir
+    pub fn get_all_packages(src_dir: &Path) -> ResType<FxHashMap<String, PathBuf>> {
+        // GET EVERY DIR IN SOURCE THAT NOT START WITH '.'
+        let entries = src_dir
+            .read_dir()
+            .map_err(|err| {
+                let msg = format!("get all packages: {err}");
+                ErKind::IOFailRead(src_dir.to_path_buf(), msg)
+            })?
+            .flatten();
+
+        let pkgs: FxHashMap<String, PathBuf> = entries
+            .filter_map(|f| {
+                f.metadata().ok()?.is_dir().then(|| {
+                    let n = f.file_name();
+                    if n.as_bytes().first()? == &b'.' {
+                        return None;
+                    }
+                    let name = n.into_string().ok()?;
+                    Some((name, f.path()))
+                })?
+            })
+            .collect();
+
+        if pkgs.is_empty() {
+            Err(ErKind::SourceEmpty)
+        } else {
+            Ok(pkgs)
+        }
+    }
+
+    /// Extract pkgs info from hashmap if match
+    /// Also print out info.
+    pub fn get_pkg_by_name(
+        src_pks: &mut FxHashMap<String, PathBuf>,
+        name: impl AsRef<str>,
+    ) -> Option<Vec<(String, PathBuf)>> {
+        let pks: Vec<(String, PathBuf)> = src_pks
+            .extract_if(|k, _| wildmatch::WildMatch::new(name.as_ref()).matches(k))
+            .collect();
+
+        let num = pks.len();
+        if num == 0 {
+            log::error(format!(
+                "not found in <source>, package: '{}'",
+                console::style(name.as_ref()).blue()
+            ));
+            return None;
+        } else if num > 1 {
+            let name = console::style(name.as_ref()).blue();
+            // TODO: maybe print out expansion name.
+            log::info(format!("expand to [{num:02}] packages /w key: '{}'", name));
+        }
+        Some(pks)
+    }
+
+    /// Get all files in provided path.
+    pub fn get_files_in_path(path: &Path, pattern: Option<&str>) -> ResType<Vec<PathBuf>> {
+        let req_name = pattern.unwrap_or("*");
+        let pat = format!("{}/**/{req_name}", path.display(),);
+        let globs: Vec<PathBuf> = glob::glob(&pat)
+            .expect("pattern checked") // TODO: check for bad pattern
+            .flatten()
+            .filter(|p| p.is_file())
+            .collect();
+
+        if !globs.is_empty() {
+            Ok(globs)
+        } else if !matches!(req_name, "*") {
+            let pk_name = path.file_name().unwrap().to_os_string();
+            Err(ErKind::NotFoundFile(pk_name, req_name.to_string()))
+        } else {
+            Err(ErKind::Generic("package empty!!!"))
+        }
     }
 }

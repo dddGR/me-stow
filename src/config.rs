@@ -1,12 +1,17 @@
 /* ----------------------------------------------------- */
 /* CONFIGURATIONS READER ------------------------------- */
 
-use dialoguer::{Input, theme::ColorfulTheme};
-use me_stow::error::ErKind;
-use me_stow::log;
 use std::fs::File;
-use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::io;
+use std::io::Write;
+use std::path::Path;
+use std::path::PathBuf;
+
+use dialoguer::Input;
+use dialoguer::theme::ColorfulTheme;
+
+use crate::error::ErKind;
+use crate::log;
 
 /* ----------------------------------------------------- */
 /* CONSTANTS ------------------------------------------- */

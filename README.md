@@ -80,7 +80,7 @@ After that you can `me-stow` directory to save some space.
 
 ### Download Executable Binary
 
-The pre-build binary is provided in release section.
+The pre-build binary is provided in [release](https://github.com/dddGR/me-stow/releases) section.
 
 ### Note
 
